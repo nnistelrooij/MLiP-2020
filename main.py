@@ -11,12 +11,12 @@ from utils.tensorboard import MetricsWriter
 
 IMAGES = r'kaggle\input\bengaliai-cv19\train_image_data_64.npy'
 LABELS = r'kaggle\input\bengaliai-cv19\train.csv'
-NUM_EPOCHS = 50
-BATCH_SIZE = 32
 TEST_RATIO = 0.2
-DROP_INFO_FUNCTION = 'gridmask'  # 'cutout' or None
+NUM_EPOCHS = 50
 DATA_AUGMENTATION = True
+DROP_INFO_FUNCTION = 'gridmask'  # 'cutout' or None
 CLASS_BALANCING = True
+BATCH_SIZE = 32
 IMAGE_SIZE = 64
 MODEL = 'model.pt'
 
