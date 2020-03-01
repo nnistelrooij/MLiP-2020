@@ -1,6 +1,7 @@
 import torch
 from tqdm import tqdm
 
+
 def validate(model, val_loader, val_writer, criterion):
     """Computes loss and score of current state of model on validation data set.
 
@@ -47,7 +48,7 @@ def train(model, train_dataset, train_loader, train_writer,
         val_writer    = [SummaryWriter] TensorBoard writer of validation metrics
         optimizer     = [Optimizer] optimizer to update the model
         criterion     = [nn.Module] neural network module to compute loss
-        num_epochs    = [int] number of iterations of the train data set
+        num_epochs    = [int] number of iterations over the train data set
     """
     for epoch in range(num_epochs):
         for data in tqdm(train_loader, desc=f'Epoch {epoch + 1}/{num_epochs}'):
@@ -72,4 +73,4 @@ def train(model, train_dataset, train_loader, train_writer,
         validate(model, val_loader, val_writer, criterion)
 
         # reset dataset to keep class balance
-        train_dataset.reset()
+        train_dataset.reset(epoch)

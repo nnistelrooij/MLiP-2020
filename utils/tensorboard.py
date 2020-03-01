@@ -9,7 +9,6 @@ class MetricsWriter(SummaryWriter):
 
     Attributes:
         num_iterations = [int] number of iterations the nn is trained
-        device         = [torch.device] device to compute the loss on
         num_batches    = [int] number of batches since the metrics were shown
         running_losses = [torch.Tensor] subproblems and combined running losses
         pred_dict      = [dict] dictionary with all predictions from the nn
@@ -26,13 +25,13 @@ class MetricsWriter(SummaryWriter):
         """
         super(MetricsWriter, self).__init__(log_dir)
 
-        self.device = device
+        self.running_losses = torch.zeros(4, device=device)
         self._reset()
 
     def _reset(self):
         """Resets the running variables."""
         self.num_batches = 0
-        self.running_losses = torch.zeros(4, device=self.device)
+        self.running_losses *= 0
         self.true_dict = {'grapheme': [], 'vowel': [], 'consonant': []}
         self.pred_dict = {'grapheme': [], 'vowel': [], 'consonant': []}
 

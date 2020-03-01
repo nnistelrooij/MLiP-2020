@@ -9,7 +9,7 @@ from torch.utils.data import Dataset, DataLoader
 from torch._six import container_abcs, int_classes, string_classes
 from torchvision import transforms
 
-from utils.transforms import Cutout
+from utils.transforms import DropInfo, Cutout, GridMask
 
 np_str_obj_array_pattern = re.compile(r'[SaUO]')
 default_collate_err_msg_format = (
@@ -64,10 +64,8 @@ class BengaliDataset(Dataset):
 
     Attributes:
         images         = [ndarray] images array with shape (N, SIZE, SIZE)
-        transform      = [Compose] applies a random affine transformation,
-                                   normalizes to z-scores, and applies cutout
-                                   transformation to a Numpy array image
-        normalize      = [Normalize] normalizes Numpy array image to z-scores
+        drop_info_fn   = [object] function to drop information from images
+        transform      = [Compose] transformation applied to each image
         labels         = [torch.Tensor] images labels tensor of shape (N, 3)
         mod_counts     = [torch.Tensor] remainders of dividing each class
                                         frequency by the highest frequency
@@ -75,39 +73,55 @@ class BengaliDataset(Dataset):
                                         frequency by the highest frequency
         current_counts = [torch.Tensor] number of retrieved items of each
                                         class in current iteration of epoch
-        augment        = [bool] whether or not the images are transformed
+        num_epochs     = [int] number of iterations over the train data set
         balance        = [bool] whether or not the classes are balanced
     """
 
-    def __init__(self, images, labels, image_size, augment=False, balance=False):
+    def __init__(self, images, labels, num_epochs=1,
+                 augment=False, drop_info_fn=None, balance=False):
         """Initialize dataset.
 
         Args:
-            images     = [ndarray] images array with shape (N, SIZE, SIZE)
-            labels     = [DataFrame] image labels DataFrame of shape (N, 3)
-            image_size = [int] the length (in pixels) of the images
-            augment    = [bool] whether or not the images are transformed
-            balance    = [bool] whether or not the classes are balanced
+            images       = [ndarray] images array with shape (N, SIZE, SIZE)
+            labels       = [DataFrame] image labels DataFrame of shape (N, 3)
+            num_epochs   = [int] number of iterations over the train data set
+            augment      = [bool] whether or not the images are transformed
+            drop_info_fn = [str] whether to use cutout ('cutout'), GridMask
+                                 ('gridmask'), or no info dropping algorithm
+            balance      = [bool] whether or not the classes are balanced
         """
         super(Dataset, self).__init__()
 
-        # initialize transformations from torchvision.transforms
         self.images = images
-        self.transform = transforms.Compose([
-            transforms.ToPILImage(),
-            transforms.RandomAffine(
-                degrees=(-8, 8),
-                translate=(1/24, 1/24),
-                scale=(8/9, 10/9)
-            ),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=(0.071374745,), std=(0.20761949,)),
-            Cutout(8, 12, image_size)
-        ])
-        self.normalize = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(mean=(0.071374745,), std=(0.20761949,))
-        ])
+
+        # initialize information dropping algorithm
+        if drop_info_fn == 'cutout':
+            self.drop_info_fn = Cutout(2, 32)
+        elif drop_info_fn == 'gridmask':
+            self.drop_info_fn = GridMask(0.6, 28, 64)
+        else:
+            self.drop_info_fn = DropInfo()
+
+        # initialize chosen transformation
+        if augment:
+            # initialize affine, normalizing, and info dropping transformations
+            self.transform = transforms.Compose([
+                transforms.ToPILImage(),
+                transforms.RandomAffine(
+                    degrees=(-8, 8),
+                    translate=(1/24, 1/24),
+                    scale=(8/9, 10/9)
+                ),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=(0.071374745,), std=(0.20761949,)),
+                self.drop_info_fn
+            ])
+        else:
+            # initialize normalizing transformation
+            self.transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize(mean=(0.071374745,), std=(0.20761949,))
+            ])
 
         # initialize labels and counts for class balancing
         self.labels = torch.tensor(labels.to_numpy())
@@ -117,12 +131,17 @@ class BengaliDataset(Dataset):
         self.ratio_counts = torch.tensor(max_counts // counts)
         self.current_counts = torch.zeros_like(self.mod_counts)
 
-        self.augment = augment
+        self.num_epochs = num_epochs
         self.balance = balance
 
-    def reset(self):
-        """Reset number of retrieved items of each class in current epoch."""
+    def reset(self, epoch):
+        """Reset class balancing and information dropping algorithms.
+
+        Args:
+            epoch = [int] current epoch of the training loop starting with 0
+        """
         self.current_counts = torch.zeros_like(self.mod_counts)
+        self.drop_info_fn.prob = min(epoch / self.num_epochs, 0.8)
 
     def __len__(self):
         return len(self.images)
@@ -152,22 +171,6 @@ class BengaliDataset(Dataset):
 
         return num_augments.long()
 
-    def _augment_or_normalize(self, image):
-        """Augments (including normalization) or normalizes image.
-
-        Args:
-            image = [ndarray] Numpy array image of shape (SIZE, SIZE)
-
-        Returns [torch.Tensor]
-            Augmented or normalized image with shape (1, 1, SIZE, SIZE).
-        """
-        if self.augment:  # random affine, normalize, cutout
-            image = self.transform(image)
-        else:  # normalize
-            image = self.normalize(image)
-
-        return image.unsqueeze(0)
-
     def __getitem__(self, idx):
         """Get images, labels, and number of augmentations.
 
@@ -189,9 +192,10 @@ class BengaliDataset(Dataset):
         num_augments = self._num_augmentations(labels)
 
         # transform or normalize image
-        images = self._augment_or_normalize(image)
-        for _ in range(max(num_augments) - 1):
-            images = torch.cat((images, self._augment_or_normalize(image)))
+        images = []
+        for _ in range(max(num_augments)):
+            images.append(self.transform(image))
+        images = torch.stack(images)
 
         # repeat labels given number of augmentations
         labels = [labels[i].repeat(num_augments[i]) for i in range(len(labels))]
@@ -200,18 +204,20 @@ class BengaliDataset(Dataset):
         return (images,) + tuple(labels) + (num_augments.unsqueeze(0),)
 
 
-def load_data(images_path, labels_path, image_size, batch_size,
-              split=0.2, augment=False, balance=False):
+def load_data(images_path, labels_path, num_epochs, batch_size,
+              split=0.2, drop_info_fn=None, augment=False, balance=False):
     """Load the images and labels from storage into DataLoader objects.
 
     Args:
-        images_path = [str] path for the images .npy file
-        labels_path = [str] path for the labels CSV file
-        image_size  = [int] the length (in pixels) of the images
-        batch_size  = [int] batch size of the DataLoader objects
-        split       = [float] percentage of data used for validation
-        augment     = [bool] whether or not the images are transformed
-        balance     = [bool] whether or not the classes are balanced
+        images_path  = [str] path for the images .npy file
+        labels_path  = [str] path for the labels CSV file
+        num_epochs   = [int] number of iterations over the train data set
+        batch_size   = [int] batch size of the DataLoader objects
+        split        = [float] percentage of data used for validation
+        drop_info_fn = [str] whether to use cutout ('cutout'), GridMask
+                             ('gridmask'), or no info dropping algorithm
+        augment      = [bool] whether or not the images are transformed
+        balance      = [bool] whether or not the classes are balanced
 
     Returns [BengaliDataset, DataLoader, DataLoader]:
         train_dataset = data set of the training data
@@ -227,13 +233,13 @@ def load_data(images_path, labels_path, image_size, batch_size,
     gc.collect()  # garbage collection
 
     # training set
-    train_dataset = BengaliDataset(train_images, train_labels, image_size,
-                                   augment=augment, balance=balance)
+    train_dataset = BengaliDataset(train_images, train_labels, num_epochs,
+                                   augment, drop_info_fn, balance)
     train_loader = DataLoader(train_dataset, shuffle=True, num_workers=4,
                               batch_size=batch_size, collate_fn=_cat_collate)
 
     # validation set
-    val_dataset = BengaliDataset(val_images, val_labels, image_size)
+    val_dataset = BengaliDataset(val_images, val_labels)
     val_loader = DataLoader(val_dataset, batch_size=batch_size,
                             num_workers=4,  collate_fn=_cat_collate)
 

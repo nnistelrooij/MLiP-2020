@@ -9,14 +9,21 @@ from optim import train
 from utils.data import load_data
 from utils.tensorboard import MetricsWriter
 
-SIZE = 64  # length (in pixels) of the images
-BATCH_SIZE = 32  # batch size of the data loaders
-PATH = 'model.pt'  # where to store the trained network
+IMAGES = r'kaggle\input\bengaliai-cv19\train_image_data_64.npy'
+LABELS = r'kaggle\input\bengaliai-cv19\train.csv'
+NUM_EPOCHS = 50
+BATCH_SIZE = 32
+TRAIN_TEST_RATIO = 0.2
+DROP_INFO_FUNCTION = 'gridmask'  # 'cutout' or None
+DATA_AUGMENTATION = True
+CLASS_BALANCING = True
+IMAGE_SIZE = 64
+MODEL = 'model.pt'
 
 if __name__ == '__main__':
     # load training and validation data
-    data = load_data('train_image_data_64.npy', 'train.csv', SIZE, BATCH_SIZE,
-                     augment=False, balance=False)
+    data = load_data(IMAGES, LABELS, NUM_EPOCHS, BATCH_SIZE, TRAIN_TEST_RATIO,
+                     DROP_INFO_FUNCTION, DATA_AUGMENTATION, CLASS_BALANCING)
     train_dataset, train_loader, val_loader = data
 
     # use GPU if available
@@ -25,7 +32,7 @@ if __name__ == '__main__':
 
     # initialize network and show summary
     model = ZeroNet(device).train()
-    summary(model, input_size=(1, SIZE, SIZE), device=str(device))
+    summary(model, input_size=(1, IMAGE_SIZE, IMAGE_SIZE), device=str(device))
 
     # initialize optimizer and criterion
     optimizer = Adam(model.parameters(), lr=0.001)
@@ -34,7 +41,7 @@ if __name__ == '__main__':
     # TensorBoard writers
     current_time = datetime.now().strftime("%Y-%m-%d/%H'%M'%S")
     train_writer = MetricsWriter(device, f'runs/{current_time}/train')
-    train_writer.add_graph(model, iter(train_loader).next()[0])   # show model
+    train_writer.add_graph(model, next(iter(train_loader))[0])   # show model
     val_writer = MetricsWriter(device, f'runs/{current_time}/validation')
 
     # train and validate model
@@ -42,4 +49,4 @@ if __name__ == '__main__':
           val_loader, val_writer, optimizer, criterion)
 
     # save model to storage
-    torch.save(model.state_dict(), PATH)
+    torch.save(model.state_dict(), MODEL)
