@@ -51,6 +51,9 @@ def train(model, train_dataset, train_loader, train_writer,
         num_epochs    = [int] number of iterations over the train data set
     """
     for epoch in range(num_epochs):
+        # reset dataset to keep class balance and update augment probability
+        train_dataset.reset(epoch)
+
         for data in tqdm(train_loader, desc=f'Epoch {epoch + 1}/{num_epochs}'):
             x, t_graph, t_vowel, t_conso, num_augments = data
 
@@ -71,6 +74,3 @@ def train(model, train_dataset, train_loader, train_writer,
 
         # evaluate model on validation data
         validate(model, val_loader, val_writer, criterion)
-
-        # reset dataset to keep class balance
-        train_dataset.reset(epoch)

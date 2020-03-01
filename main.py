@@ -13,7 +13,7 @@ IMAGES = r'kaggle\input\bengaliai-cv19\train_image_data_64.npy'
 LABELS = r'kaggle\input\bengaliai-cv19\train.csv'
 NUM_EPOCHS = 50
 BATCH_SIZE = 32
-TRAIN_TEST_RATIO = 0.2
+TEST_RATIO = 0.2
 DROP_INFO_FUNCTION = 'gridmask'  # 'cutout' or None
 DATA_AUGMENTATION = True
 CLASS_BALANCING = True
@@ -22,8 +22,8 @@ MODEL = 'model.pt'
 
 if __name__ == '__main__':
     # load training and validation data
-    data = load_data(IMAGES, LABELS, NUM_EPOCHS, BATCH_SIZE, TRAIN_TEST_RATIO,
-                     DROP_INFO_FUNCTION, DATA_AUGMENTATION, CLASS_BALANCING)
+    data = load_data(IMAGES, LABELS, TEST_RATIO, NUM_EPOCHS, DATA_AUGMENTATION,
+                     DROP_INFO_FUNCTION, CLASS_BALANCING, BATCH_SIZE)
     train_dataset, train_loader, val_loader = data
 
     # use GPU if available

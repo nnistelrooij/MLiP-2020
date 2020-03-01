@@ -204,20 +204,20 @@ class BengaliDataset(Dataset):
         return (images,) + tuple(labels) + (num_augments.unsqueeze(0),)
 
 
-def load_data(images_path, labels_path, num_epochs, batch_size,
-              split=0.2, drop_info_fn=None, augment=False, balance=False):
+def load_data(images_path, labels_path, split, num_epochs, augment,
+              drop_info_fn, balance, batch_size):
     """Load the images and labels from storage into DataLoader objects.
 
     Args:
         images_path  = [str] path for the images .npy file
         labels_path  = [str] path for the labels CSV file
-        num_epochs   = [int] number of iterations over the train data set
-        batch_size   = [int] batch size of the DataLoader objects
         split        = [float] percentage of data used for validation
+        num_epochs   = [int] number of iterations over the train data set
+        augment      = [bool] whether or not the images are transformed
         drop_info_fn = [str] whether to use cutout ('cutout'), GridMask
                              ('gridmask'), or no info dropping algorithm
-        augment      = [bool] whether or not the images are transformed
         balance      = [bool] whether or not the classes are balanced
+        batch_size   = [int] batch size of the DataLoader objects
 
     Returns [BengaliDataset, DataLoader, DataLoader]:
         train_dataset = data set of the training data
