@@ -39,6 +39,52 @@ class CrossEntropySumLoss(nn.Module):
         losses.append(sum(losses))
         return torch.stack(losses)
 
+    
+class LabelSmoothingLoss(nn.Module):
+    """
+    Adapted from:
+    https://github.com/pytorch/pytorch/issues/7455#issuecomment-513062631
+    
+    Cross entropy loss with label smoothing.    
+    When `smoothing=0.0`, the loss will be equivalent to 
+    standard cross entropy loss (`F.cross_entropy`).
+    """
+    def __init__(self, classes, smoothing=0.0, dim=-1):
+        """
+        Args:
+            classes   = [tuple] number of classes for grapheme_root, 
+                        vowel_diacritic, and consonant_diacritic
+            smoothing = [float] controls degree of smoothing
+            dim       = [int] dimension to compute the loss over
+        """
+        super(LabelSmoothingLoss, self).__init__()
+        self.confidence = 1.0 - smoothing
+        self.smoothing = smoothing # alpha
+        self.classes =  classes # (graph, vowel, consonant) 
+        self.dim = dim
+
+    def forward(self, pred, target):
+        """
+        Args:
+            pred   = [tuple] sequence of tensors of (raw) predictions
+            target = [tuple] sequence of tensors of targets
+            
+        Returns [torch.Tensor]:
+            The grapheme_root, vowel_dacritic, consonant_diacritic,
+            and combined losses given the predictions and targets.
+        """
+        losses = []
+        for y, t, cls in zip(pred, target, self.classes):
+            y = y.log_softmax(dim=self.dim)  
+            with torch.no_grad():
+                true_dist = torch.zeros_like(y)
+                true_dist.fill_(self.smoothing / (cls - 1))
+                true_dist.scatter_(1, t.data.unsqueeze(1), self.confidence)
+                losses.append( torch.mean(torch.sum(-true_dist * y, dim=self.dim)) )
+                
+        losses.append(sum(losses))
+        return torch.stack(losses)
+
 
 def _split_vectors(vectors, num_augments):
     """Splits the latent vectors into tensors for each subproblem.
