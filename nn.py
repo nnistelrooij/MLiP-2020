@@ -141,13 +141,13 @@ class BengaliNet(nn.Module):
         self.bn = nn.BatchNorm2d(3)
 
         # create large pre-trained ResNet model to generate image embeddings
-        self.resnet18 = models.resnet18(pretrained=True)
-        self.resnet18 = nn.Sequential(*list(self.resnet18.children())[:-1])
-        for param in self.resnet18.parameters():
+        self.resnet50 = models.resnet50(pretrained=True)
+        self.resnet50 = nn.Sequential(*list(self.resnet18.children())[:-1])
+        for param in self.resnet50.parameters():
             param.requires_grad = False
 
         # extra fully-connected layers to determine labels
-        self.fc1 = nn.Linear(512, 256)
+        self.fc1 = nn.Linear(2048, 256)
         self.fc2 = nn.Linear(256, 168)
         self.fc3 = nn.Linear(256, 11)
         self.fc4 = nn.Linear(256, 7)
@@ -162,7 +162,7 @@ class BengaliNet(nn.Module):
         h = self.conv(x)
         h = self.bn(h)
 
-        h = self.resnet18(h)
+        h = self.resnet50(h)
         h = h.flatten(start_dim=1)
 
         h = self.fc1(h)
