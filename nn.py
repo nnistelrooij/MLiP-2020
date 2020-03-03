@@ -49,7 +49,7 @@ class LabelSmoothingLoss(nn.Module):
     When `smoothing=0.0`, the loss will be equivalent to 
     standard cross entropy loss (`F.cross_entropy`).
     """
-    def __init__(self, classes, smoothing=0.0, dim=-1):
+    def __init__(self, device, classes, smoothing=0.0, dim=-1):
         """
         Args:
             classes   = [tuple] number of classes for grapheme_root, 
@@ -62,6 +62,7 @@ class LabelSmoothingLoss(nn.Module):
         self.smoothing = smoothing # alpha
         self.classes =  classes # (graph, vowel, consonant) 
         self.dim = dim
+        self.device = device
 
     def forward(self, pred, target):
         """
@@ -75,6 +76,7 @@ class LabelSmoothingLoss(nn.Module):
         """
         losses = []
         for y, t, cls in zip(pred, target, self.classes):
+            t = t.to(self.device)
             y = y.log_softmax(dim=self.dim)  
             with torch.no_grad():
                 true_dist = torch.zeros_like(y)
