@@ -142,7 +142,7 @@ class BengaliNet(nn.Module):
 
         # create large pre-trained ResNet model to generate image embeddings
         self.resnet50 = models.resnet50(pretrained=True)
-        self.resnet50 = nn.Sequential(*list(self.resnet18.children())[:-1])
+        self.resnet50 = nn.Sequential(*list(self.resnet50.children())[:-1])
         for param in self.resnet50.parameters():
             param.requires_grad = False
 
