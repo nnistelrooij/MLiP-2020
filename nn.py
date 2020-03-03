@@ -48,26 +48,27 @@ class LabelSmoothingLoss(nn.Module):
     Cross entropy loss with label smoothing.    
     When `smoothing=0.0`, the loss will be equivalent to 
     standard cross entropy loss (`F.cross_entropy`).
+
+    Attributes:
+        smoothing  = [float] controls degree of smoothing, in range [0, 1)
+        confidence = [float] max probability in smoothed labels, 1 - smoothing
+        device     = [torch.device] device to compute the loss on
     """
-    def __init__(self, device, classes, smoothing=0.0, dim=-1):
+    def __init__(self, device, smoothing=0.0):
         """
         Args:
-            classes   = [tuple] number of classes for grapheme_root, 
-                        vowel_diacritic, and consonant_diacritic
-            smoothing = [float] controls degree of smoothing
-            dim       = [int] dimension to compute the loss over
+            device    = [torch.device] device to compute the loss on
+            smoothing = [float] controls degree of smoothing, in range [0, 1)
         """
         super(LabelSmoothingLoss, self).__init__()
-        self.confidence = 1.0 - smoothing
-        self.smoothing = smoothing # alpha
-        self.classes =  classes # (graph, vowel, consonant) 
-        self.dim = dim
+        self.smoothing = smoothing  # alpha
+        self.confidence = 1 - smoothing
         self.device = device
 
-    def forward(self, pred, target):
+    def forward(self, input, target):
         """
         Args:
-            pred   = [tuple] sequence of tensors of (raw) predictions
+            input  = [tuple] sequence of tensors of (raw) predictions
             target = [tuple] sequence of tensors of targets
             
         Returns [torch.Tensor]:
@@ -75,14 +76,18 @@ class LabelSmoothingLoss(nn.Module):
             and combined losses given the predictions and targets.
         """
         losses = []
-        for y, t, cls in zip(pred, target, self.classes):
-            t = t.to(self.device)
-            y = y.log_softmax(dim=self.dim)  
-            with torch.no_grad():
-                true_dist = torch.zeros_like(y)
-                true_dist.fill_(self.smoothing / (cls - 1))
-                true_dist.scatter_(1, t.data.unsqueeze(1), self.confidence)
-                losses.append( torch.mean(torch.sum(-true_dist * y, dim=self.dim)) )
+        for y, t in zip(input, target):
+            num_classes = y.size(-1)
+            t = t.to(self.device).unsqueeze(-1)
+
+            # compute smoothed labels
+            t_smooth = torch.full_like(y, self.smoothing / (num_classes - 1))
+            t_smooth = t_smooth.scatter(-1, t, self.confidence)
+
+            # compute smoothed cross entropy loss
+            y = y.log_softmax(dim=-1)
+            loss = (-t_smooth * y).sum(dim=-1).mean()
+            losses.append(loss)
                 
         losses.append(sum(losses))
         return torch.stack(losses)
