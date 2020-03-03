@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchvision import models
 
 
 class CrossEntropySumLoss(nn.Module):
@@ -122,4 +123,51 @@ class ZeroNet(nn.Module):
         y_graph = self.fc2(x_graph)
         y_vowel = self.fc3(x_vowel)
         y_conso = self.fc4(x_conso)
+        return y_graph, y_vowel, y_conso
+
+
+class BengaliNet(nn.Module):
+    """Model that uses ResNet-50 for intermediate layers.
+
+    Attributes:
+        device = [torch.device] device to run the model on
+    """
+
+    def __init__(self, device):
+        super(BengaliNet, self).__init__()
+
+        # convolutional layer to get required number of channels
+        self.conv = nn.Conv2d(1, 3, 5, padding=2)
+        self.bn = nn.BatchNorm2d(3)
+
+        # create large pre-trained ResNet model to generate image embeddings
+        self.resnet18 = models.resnet18(pretrained=True)
+        self.resnet18 = nn.Sequential(*list(self.resnet18.children())[:-1])
+        for param in self.resnet18.parameters():
+            param.requires_grad = False
+
+        # extra fully-connected layers to determine labels
+        self.fc1 = nn.Linear(512, 256)
+        self.fc2 = nn.Linear(256, 168)
+        self.fc3 = nn.Linear(256, 11)
+        self.fc4 = nn.Linear(256, 7)
+
+        self.device = device
+        self.to(self.device)
+
+    def forward(self, x, num_augments=None):
+        # put images on GPU
+        x = x.to(self.device)
+
+        h = self.conv(x)
+        h = self.bn(h)
+
+        h = self.resnet18(h)
+        h = h.flatten(start_dim=1)
+
+        h = self.fc1(h)
+        h_graph, h_vowel, h_conso = _split_vectors(h, num_augments)
+        y_graph = self.fc2(h_graph)
+        y_vowel = self.fc3(h_vowel)
+        y_conso = self.fc4(h_conso)
         return y_graph, y_vowel, y_conso

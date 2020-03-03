@@ -4,7 +4,7 @@ import torch
 from torch.optim import Adam
 from torchsummary import summary  # pip install torchsummary
 
-from nn import CrossEntropySumLoss, ZeroNet
+from nn import CrossEntropySumLoss, ZeroNet, BengaliNet
 from optim import train
 from utils.data import load_data
 from utils.tensorboard import MetricsWriter
@@ -13,10 +13,10 @@ IMAGES = r'kaggle\input\bengaliai-cv19\train_image_data_64.npy'
 LABELS = r'kaggle\input\bengaliai-cv19\train.csv'
 TEST_RATIO = 0.2
 NUM_EPOCHS = 50
-DATA_AUGMENTATION = True
+DATA_AUGMENTATION = False
 DROP_INFO_FUNCTION = 'gridmask'  # 'cutout' or None
-CLASS_BALANCING = True
-BATCH_SIZE = 32
+CLASS_BALANCING = False
+BATCH_SIZE = 8
 IMAGE_SIZE = 64
 MODEL = 'model.pt'
 
@@ -31,7 +31,7 @@ if __name__ == '__main__':
     print('Device:', device)
 
     # initialize network and show summary
-    model = ZeroNet(device).train()
+    model = BengaliNet(device).train()
     summary(model, input_size=(1, IMAGE_SIZE, IMAGE_SIZE), device=str(device))
 
     # initialize optimizer and criterion
