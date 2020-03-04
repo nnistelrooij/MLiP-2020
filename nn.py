@@ -227,7 +227,7 @@ class BengaliNet(nn.Module):
         h = h.flatten(start_dim=1)
 
         # determine subproblem logits
-        h = self.fc1(h)
+        h = F.relu(self.fc1(h))
         h_graph, h_vowel, h_conso = _split_vectors(h, num_augments)
         y_graph = self.fc2(h_graph)
         y_vowel = self.fc3(h_vowel)
