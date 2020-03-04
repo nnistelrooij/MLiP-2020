@@ -76,7 +76,7 @@ if __name__ == '__main__':
 
     # initialize optimizer, scheduler, and criterion
     optimizer = Adam(model.parameters(), lr=0.001)
-    scheduler = ReduceLROnPlateau(optimizer, 'max', patience=5, verbose=True)
+    scheduler = ReduceLROnPlateau(optimizer, 'max', verbose=True)
     if args.label_smoothing:
         criterion = LabelSmoothingLoss(device, 0.1)
     else:

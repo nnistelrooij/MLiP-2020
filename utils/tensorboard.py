@@ -8,12 +8,14 @@ class MetricWriter(SummaryWriter):
     """Class to periodically show metrics on TensorBoard.
 
     Attributes:
+        num_iterations = [int] number of iterations the model has been trained
         num_images     = [int] number of images the model has been trained on
         num_batches    = [int] number of batches since the metrics were shown
         pred_dict      = [dict] dictionary with all predictions from the model
         true_dict      = [dict] dictionary with all the true labels
         running_losses = [torch.Tensor] sub-problems and combined running losses
     """
+    num_iterations = 0
     num_images = 0
 
     def __init__(self, device, log_dir=None):
@@ -91,7 +93,7 @@ class MetricWriter(SummaryWriter):
         self.add_scalar('Loss/total', losses[3], self.num_images)
 
     def show_metrics(self, preds=None, targets=None, losses=None,
-                     num_images=0, eval_freq=28000, end=False):
+                     num_images=0, eval_freq=100, end=False):
         """Show the losses and scores on TensorBoard.
 
         Args:
@@ -108,6 +110,7 @@ class MetricWriter(SummaryWriter):
         """
         if not end:
             # increment total number of training images during run
+            MetricWriter.num_iterations += num_images > 0
             MetricWriter.num_images += num_images
 
             # increment number of batches to show metrics over
@@ -118,7 +121,7 @@ class MetricWriter(SummaryWriter):
             self.running_losses += losses.data
 
         # show metrics every eval_freq images or at the end of an epoch
-        if self.num_images % eval_freq == (eval_freq - 1) or end:
+        if self.num_iterations % eval_freq == (eval_freq - 1) or end:
             # show scores on TensorBoard
             scores = self._eval_metric()
             self._show_scores(scores)
