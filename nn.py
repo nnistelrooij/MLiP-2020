@@ -79,7 +79,7 @@ class LabelSmoothingLoss(nn.Module):
         losses = []
         for y, t in zip(input, target):
             num_classes = y.size(-1)
-            t = t.to(self.device).unsqueeze(-1)
+            t = t.unsqueeze(-1).to(self.device)
 
             # compute smoothed labels
             t_smooth = torch.full_like(y, self.smoothing / (num_classes - 1))
@@ -114,10 +114,10 @@ def _split_vectors(vectors, num_augments):
         return vectors, vectors, vectors
 
     # determine the slices of the latent vectors for each subproblem
-    max_augments, _ = num_augments.max(dim=1, keepdim=True)
-    diffs = torch.cat((torch.zeros(1, 1).long(), max_augments))
+    max_augments, _ = num_augments.max(dim=-1, keepdim=True)
+    diffs = torch.cat((torch.tensor([[0]]), max_augments))
     start_indices = torch.cumsum(diffs, dim=0)[:-1]
-    slices = torch.cat((start_indices, start_indices + num_augments), dim=1)
+    slices = torch.cat((start_indices, start_indices + num_augments), dim=-1)
 
     # determine the indices of the latent vectors for each subproblem
     graph = torch.cat([torch.arange(st, end) for st, end in slices[:, [0, 1]]])
@@ -189,10 +189,11 @@ class BengaliNet(nn.Module):
 
         # convolutional layer to get required number of channels
         self.conv1 = nn.Conv2d(1, 64, 5, padding=2, bias=False)
+        self.bn1 = nn.BatchNorm2d(64)
 
         # create large pre-trained ResNet model to generate image embeddings
         self.resnet50 = models.resnet50(pretrained=True)
-        self.resnet50 = nn.Sequential(*list(self.resnet50.children())[1:-1])
+        self.resnet50 = nn.Sequential(*list(self.resnet50.children())[2:-1])
         for param in self.resnet50.parameters():
             param.requires_grad = False
 
@@ -221,6 +222,7 @@ class BengaliNet(nn.Module):
 
         # get correct number of channels for ResNet50
         h = self.conv1(x)
+        h = self.bn1(h)
 
         # get latent vectors from ResNet50
         h = self.resnet50(h)

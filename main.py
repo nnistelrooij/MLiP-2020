@@ -3,13 +3,14 @@ from datetime import datetime
 import torch
 import argparse
 from torch.optim import Adam
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torchsummary import summary  # pip install torchsummary
 
 from nn import CrossEntropySumLoss, LabelSmoothingLoss
 from nn import ZeroNet, BengaliNet
-from optim import train
+from optim import optimize
 from utils.data import load_data
-from utils.tensorboard import MetricsWriter
+from utils.tensorboard import MetricWriter
 
 
 def handle_arguments():
@@ -59,8 +60,7 @@ if __name__ == '__main__':
                      args.labels,
                      args.test_ratio,
                      args.num_epochs,
-                     args.data_augmentation,
-                     args.drop_info_fn,
+                     args.data_augmentation, args.drop_info_fn,
                      args.class_balancing,
                      args.batch_size)
     train_dataset, train_loader, val_loader = data
@@ -74,8 +74,9 @@ if __name__ == '__main__':
     input_size = 1, args.image_size, args.image_size
     summary(model, input_size=input_size, device=str(device))
 
-    # initialize optimizer and criterion
+    # initialize optimizer, scheduler, and criterion
     optimizer = Adam(model.parameters(), lr=0.001)
+    scheduler = ReduceLROnPlateau(optimizer, 'max', patience=5, verbose=True)
     if args.label_smoothing:
         criterion = LabelSmoothingLoss(device, 0.1)
     else:
@@ -83,13 +84,17 @@ if __name__ == '__main__':
 
     # TensorBoard writers
     current_time = datetime.now().strftime("%Y-%m-%d/%H'%M'%S")
-    train_writer = MetricsWriter(device, f'runs/{current_time}/train')
+    train_writer = MetricWriter(device, f'runs/{current_time}/train')
     train_writer.add_graph(model, next(iter(train_loader))[0])   # show model
-    val_writer = MetricsWriter(device, f'runs/{current_time}/validation')
+    val_writer = MetricWriter(device, f'runs/{current_time}/validation')
 
     # train and validate model
-    train(model, train_dataset, train_loader, train_writer,
-          val_loader, val_writer, optimizer, criterion)
+    optimize(model,
+             train_dataset, train_loader, train_writer,
+             val_loader, val_writer,
+             optimizer, scheduler,
+             criterion,
+             args.num_epochs)
 
     # save model to storage
     torch.save(model.state_dict(), args.model)
