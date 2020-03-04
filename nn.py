@@ -160,27 +160,25 @@ class ZeroNet(nn.Module):
                                           problem with shape (BATCH_SIZE, 3)
 
         Returns [torch.Tensor]*3:
-            Non-normalized predictions for each class for each subproblem.
+            Non-normalized predictions for each class for each sub-problem.
         """
         # put images on GPU
         x = x.to(self.device)
 
-        x = F.relu(F.max_pool2d(self.conv1(x), 3))
-        x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 3))
-        x = x.flatten(start_dim=1)   # flatten representation
-        x = F.relu(self.fc1(x))
-        # x = F.dropout(x, training=self.training)
-        # x = self.fc2(x)
+        h = F.relu(F.max_pool2d(self.conv1(x), 3))
+        h = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(h)), 3))
+        h = h.flatten(start_dim=1)   # flatten representation
+        h = F.relu(self.fc1(h))
 
-        x_graph, x_vowel, x_conso = _split_vectors(x, num_augments)
-        y_graph = self.fc2(x_graph)
-        y_vowel = self.fc3(x_vowel)
-        y_conso = self.fc4(x_conso)
+        h_graph, h_vowel, h_conso = _split_vectors(h, num_augments)
+        y_graph = self.fc2(h_graph)
+        y_vowel = self.fc3(h_vowel)
+        y_conso = self.fc4(h_conso)
         return y_graph, y_vowel, y_conso
 
 
 class BengaliNet(nn.Module):
-    """Model that uses ResNet-50 for intermediate layers.
+    """Model that uses pre-trained ResNet-50 for intermediate layers.
 
     Attributes:
         device = [torch.device] device to run the model on
@@ -190,12 +188,11 @@ class BengaliNet(nn.Module):
         super(BengaliNet, self).__init__()
 
         # convolutional layer to get required number of channels
-        self.conv = nn.Conv2d(1, 3, 5, padding=2)
-        self.bn = nn.BatchNorm2d(3)
+        self.conv1 = nn.Conv2d(1, 64, 5, padding=2, bias=False)
 
         # create large pre-trained ResNet model to generate image embeddings
         self.resnet50 = models.resnet50(pretrained=True)
-        self.resnet50 = nn.Sequential(*list(self.resnet50.children())[:-1])
+        self.resnet50 = nn.Sequential(*list(self.resnet50.children())[1:-1])
         for param in self.resnet50.parameters():
             param.requires_grad = False
 
@@ -209,15 +206,27 @@ class BengaliNet(nn.Module):
         self.to(self.device)
 
     def forward(self, x, num_augments=None):
+        """Foward pass of the CNN.
+
+        Args:
+            x            = [torch.Tensor] images with shape (N, 1, SIZE, SIZE)
+            num_augments = [torch.Tensor] number of augmentations per sub-
+                                          problem with shape (BATCH_SIZE, 3)
+
+        Returns [torch.Tensor]*3:
+            Non-normalized predictions for each class for each sub-problem.
+        """
         # put images on GPU
         x = x.to(self.device)
 
-        h = self.conv(x)
-        h = self.bn(h)
+        # get correct number of channels for ResNet50
+        h = self.conv1(x)
 
+        # get latent vectors from ResNet50
         h = self.resnet50(h)
         h = h.flatten(start_dim=1)
 
+        # determine subproblem logits
         h = self.fc1(h)
         h_graph, h_vowel, h_conso = _split_vectors(h, num_augments)
         y_graph = self.fc2(h_graph)

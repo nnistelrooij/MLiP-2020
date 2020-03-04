@@ -8,13 +8,13 @@ class MetricsWriter(SummaryWriter):
     """Class to periodically show metrics on TensorBoard.
 
     Attributes:
-        num_iterations = [int] number of iterations the nn is trained
+        num_images     = [int] number of images the model has been trained on
         num_batches    = [int] number of batches since the metrics were shown
         running_losses = [torch.Tensor] subproblems and combined running losses
         pred_dict      = [dict] dictionary with all predictions from the nn
         true_dict      = [dict] dictionary with all the true labels
     """
-    num_iterations = 0
+    num_images = 0
 
     def __init__(self, device, log_dir=None):
         """Initialize this class as subclass of SummaryWriter.
@@ -69,21 +69,21 @@ class MetricsWriter(SummaryWriter):
             self.pred_dict[key] += y.argmax(dim=1).tolist()
 
     def show_metrics(self, losses=None, preds=None, targets=None,
-                     inc=True, eval_freq=100, end=False):
+                     num_images=0, eval_freq=100000, end=False):
         """Show the losses and scores on TensorBoard.
 
         Args:
-            losses    = [torch.Tensor] subproblem losses and combined loss
-            preds     = [tuple] sequence of tensors of (raw) predictions
-            targets   = [tuple] sequence of tensors of targets
-            inc       = [bool] whether to increment the number of iterations
-            eval_freq = [int] number of iterations before the next TensorBoard
-                              update; if set to -1, TensorBoard never updates
-            end       = [bool] always shows metrics after epoch has ended
+            losses     = [torch.Tensor] subproblem losses and combined loss
+            preds      = [tuple] sequence of tensors of (raw) predictions
+            targets    = [tuple] sequence of tensors of targets
+            num_images = [int] number of unique images in current batch
+            eval_freq  = [int] number of images before the next TensorBoard
+                               update; if set to -1, TensorBoard never updates
+            end        = [bool] always shows metrics after epoch has ended
         """
         if not end:
-            # increment total number of training iterations during run
-            MetricsWriter.num_iterations += inc
+            # increment total number of training images during run
+            MetricsWriter.num_images += num_images
 
             # increment number of batches to show metrics over
             self.num_batches += 1
@@ -92,29 +92,29 @@ class MetricsWriter(SummaryWriter):
             self.running_losses += losses.data
             self._update_dicts(preds, targets)
 
-        # show metrics every eval_freq iterations or at the end of an epoch
-        if MetricsWriter.num_iterations % eval_freq == (eval_freq - 1) or end:
+        # show metrics every eval_freq images or at the end of an epoch
+        if self.num_images % eval_freq == (eval_freq - 1) or end:
             # show losses in TensorBoard
             losses = self.running_losses / self.num_batches
             self.add_scalar('Loss/grapheme_root',
-                            losses[0], MetricsWriter.num_iterations)
+                            losses[0], self.num_images)
             self.add_scalar('Loss/vowel_diacritic',
-                            losses[1], MetricsWriter.num_iterations)
+                            losses[1], self.num_images)
             self.add_scalar('Loss/consonant_diacritic',
-                            losses[2], MetricsWriter.num_iterations)
+                            losses[2], self.num_images)
             self.add_scalar('Loss/total',
-                            losses[3], MetricsWriter.num_iterations)
+                            losses[3], self.num_images)
 
             # show scores in TensorBoard
             scores = self._eval_metric()
             self.add_scalar('Score/grapheme_root',
-                            scores[0], MetricsWriter.num_iterations)
+                            scores[0], self.num_images)
             self.add_scalar('Score/vowel_diacritic',
-                            scores[1], MetricsWriter.num_iterations)
+                            scores[1], self.num_images)
             self.add_scalar('Score/consonant_diacritic',
-                            scores[2], MetricsWriter.num_iterations)
+                            scores[2], self.num_images)
             self.add_scalar('Score/total',
-                            scores[3], MetricsWriter.num_iterations)
+                            scores[3], self.num_images)
 
             # reset running variables
             self._reset()

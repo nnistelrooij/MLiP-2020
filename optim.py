@@ -26,7 +26,7 @@ def validate(model, val_loader, val_writer, criterion):
             losses = criterion(y, t)
 
             # accumulate but do not show validation metrics
-            val_writer.show_metrics(losses, y, t, inc=False, eval_freq=-1)
+            val_writer.show_metrics(losses, y, t, eval_freq=-1)
 
     # show validation metrics on TensorBoard
     val_writer.show_metrics(end=True)
@@ -70,7 +70,7 @@ def train(model, train_dataset, train_loader, train_writer,
             optimizer.step()
 
             # show train metrics every 100 iterations in TensorBoard
-            train_writer.show_metrics(losses, y, t)
+            train_writer.show_metrics(losses, y, t, len(x))
 
         # evaluate model on validation data
         validate(model, val_loader, val_writer, criterion)
