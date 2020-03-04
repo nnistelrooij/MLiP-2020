@@ -29,8 +29,8 @@ def handle_arguments():
     parser.add_argument('--data_augmentation', '-da', type=bool, default=False,
                         help='whether the images are augmented, default: False')
     parser.add_argument('--drop_info_fn', '-di', type=str, choices=drop_info_fn,
-                        default='gridmask', help='whether cutout, GridMask, or '
-                        'no information dropping is used, default: "gridmask"')
+                        default='none', help='whether cutout, GridMask, or no '
+                        'info dropping algorithm is used, default: "none"')
     parser.add_argument('--class_balancing', '-cb', type=bool, default=False,
                         help='whether the classes are balanced, default: False')
     parser.add_argument('--batch_size', '-bs', type=int, default=32,
