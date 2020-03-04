@@ -101,7 +101,7 @@ class MetricWriter(SummaryWriter):
             targets    = [tuple] sequence of tensors of targets
             losses     = [torch.Tensor] sub-problem losses and combined loss
             num_images = [int] number of unique images in current train batch
-            eval_freq  = [int] number of images before the next TensorBoard
+            eval_freq  = [int] number of iterations before the next TensorBoard
                                update; if set to -1, TensorBoard never updates
             end        = [bool] always shows metrics after epoch has ended
 
