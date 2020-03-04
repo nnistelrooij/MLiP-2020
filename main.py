@@ -5,7 +5,8 @@ import argparse
 from torch.optim import Adam
 from torchsummary import summary  # pip install torchsummary
 
-from nn import CrossEntropySumLoss, LabelSmoothingLoss, ZeroNet
+from nn import CrossEntropySumLoss, LabelSmoothingLoss
+from nn import ZeroNet, BengaliNet
 from optim import train
 from utils.data import load_data
 from utils.tensorboard import MetricsWriter
@@ -46,7 +47,7 @@ def handle_arguments():
         print(f'{arg.upper()}: {getattr(args, arg)}')
 
     return args
-
+  
 
 if __name__ == '__main__':
     args = handle_arguments()
