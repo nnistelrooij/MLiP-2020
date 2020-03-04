@@ -4,7 +4,7 @@ import torch
 from torch.optim import Adam
 from torchsummary import summary  # pip install torchsummary
 
-from nn import CrossEntropySumLoss, ZeroNet
+from nn import CrossEntropySumLoss, LabelSmoothingLoss, ZeroNet
 from optim import train
 from utils.data import load_data
 from utils.tensorboard import MetricsWriter
@@ -36,7 +36,7 @@ if __name__ == '__main__':
 
     # initialize optimizer and criterion
     optimizer = Adam(model.parameters(), lr=0.001)
-    criterion = CrossEntropySumLoss(device)
+    criterion = LabelSmoothingLoss(device, 0.1)
 
     # TensorBoard writers
     current_time = datetime.now().strftime("%Y-%m-%d/%H'%M'%S")
