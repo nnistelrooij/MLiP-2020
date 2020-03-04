@@ -39,7 +39,7 @@ def handle_arguments():
     parser.add_argument('--image_size', '-is', type=int, default=64,
                         help='length of square images in pixels, default: 64')
     parser.add_argument('--label_smoothing', '-ls', type=bool, default=False,
-                        help='whether the labels are smoothed, default=False')
+                        help='whether the labels are smoothed, default: False')
     parser.add_argument('--model', '-m', type=str, default='model.pt',
                         help='path to save trained model, default: "model.pt"')
 
