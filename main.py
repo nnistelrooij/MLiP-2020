@@ -38,6 +38,8 @@ def handle_arguments():
                         help='batch size of DataLoader objects, default: 32')
     parser.add_argument('--image_size', '-is', type=int, default=64,
                         help='length of square images in pixels, default: 64')
+    parser.add_argument('--label_smoothing', '-ls', type=bool, default=False,
+                        help='whether the labels are smoothed, default=False')
     parser.add_argument('--model', '-m', type=str, default='model.pt',
                         help='path to save trained model, default: "model.pt"')
 
@@ -68,13 +70,16 @@ if __name__ == '__main__':
     print('Device:', device)
 
     # initialize network and show summary
-    model = ZeroNet(device).train()
+    model = BengaliNet(device).train()
     input_size = 1, args.image_size, args.image_size
     summary(model, input_size=input_size, device=str(device))
 
     # initialize optimizer and criterion
     optimizer = Adam(model.parameters(), lr=0.001)
-    criterion = LabelSmoothingLoss(device, 0.1)
+    if args.label_smoothing:
+        criterion = LabelSmoothingLoss(device, 0.1)
+    else:
+        criterion = CrossEntropySumLoss(device)
 
     # TensorBoard writers
     current_time = datetime.now().strftime("%Y-%m-%d/%H'%M'%S")
