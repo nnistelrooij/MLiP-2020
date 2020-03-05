@@ -167,7 +167,7 @@ class ZeroNet(nn.Module):
 
         h = F.relu(F.max_pool2d(self.conv1(x), 3))
         h = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(h)), 3))
-        h = h.flatten(start_dim=1)   # flatten representation
+        h = h.flatten(start_dim=1)
         h = F.relu(self.fc1(h))
 
         h_graph, h_vowel, h_conso = _split_vectors(h, num_augments)
