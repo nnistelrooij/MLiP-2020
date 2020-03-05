@@ -189,19 +189,17 @@ class BengaliNet(nn.Module):
 
         # convolutional layer to get required number of channels
         self.conv1 = nn.Conv2d(1, 64, 5, padding=2, bias=False)
-        self.bn1 = nn.BatchNorm2d(64)
 
         # create large pre-trained ResNet model to generate image embeddings
-        self.resnet50 = models.resnet50(pretrained=True)
-        self.resnet50 = nn.Sequential(*list(self.resnet50.children())[2:-1])
-        for param in self.resnet50.parameters():
-            param.requires_grad = False
+        self.resnet18 = models.resnet18(pretrained=False)
+        self.resnet18 = nn.Sequential(*list(self.resnet18.children())[2:-1])
+        # for param in self.resnet18.parameters():
+        #     param.requires_grad = False
 
         # extra fully-connected layers to determine labels
-        self.fc1 = nn.Linear(2048, 256)
-        self.fc2 = nn.Linear(256, 168)
-        self.fc3 = nn.Linear(256, 11)
-        self.fc4 = nn.Linear(256, 7)
+        self.fc2 = nn.Linear(512, 168)
+        self.fc3 = nn.Linear(512, 11)
+        self.fc4 = nn.Linear(512, 7)
 
         self.device = device
         self.to(self.device)
@@ -225,11 +223,10 @@ class BengaliNet(nn.Module):
         h = self.bn1(h)
 
         # get latent vectors from ResNet50
-        h = self.resnet50(h)
+        h = self.resnet18(h)
         h = h.flatten(start_dim=1)
 
         # determine subproblem logits
-        h = F.relu(self.fc1(h))
         h_graph, h_vowel, h_conso = _split_vectors(h, num_augments)
         y_graph = self.fc2(h_graph)
         y_vowel = self.fc3(h_vowel)
