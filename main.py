@@ -24,24 +24,24 @@ def handle_arguments():
                         r'"kaggle\input\bengaliai-cv19\images.npy"')
     parser.add_argument('labels', type=str, help='provide path in style: '
                         r'"kaggle\input\bengaliai-cv19\labels.csv"')
-    parser.add_argument('--test_ratio', '-tr', type=float, default=0.2,
+    parser.add_argument('-t', '--test_ratio', type=float, default=0.2,
                         help='proportion of data for testing, default: 0.2')
-    parser.add_argument('--seed', '-s', type=int, default=None, help='seed '
+    parser.add_argument('-s', '--seed', type=int, default=None, help='seed '
                         'used for consistent data splitting, default: None')
-    parser.add_argument('--data_augmentation', '-da', type=bool, default=False,
-                        help='whether the images are augmented, default: False')
-    parser.add_argument('--drop_info_fn', '-di', type=str, choices=drop_info_fn,
+    parser.add_argument('-a', '--data_augmentation', action='store_true',
+                        help='whether the images are augmented')
+    parser.add_argument('-d', '--drop_info_fn', type=str, choices=drop_info_fn,
                         default=None, help='whether cutout, GridMask, or no '
                         'information dropping algorithm is used, default: None')
-    parser.add_argument('--class_balancing', '-cb', type=bool, default=False,
-                        help='whether the classes are balanced, default: False')
-    parser.add_argument('--batch_size', '-bs', type=int, default=32,
+    parser.add_argument('-c', '--class_balancing', action='store_true',
+                        help='whether the classes are balanced')
+    parser.add_argument('-b', '--batch_size', type=int, default=32,
                         help='batch size of DataLoader objects, default: 32')
-    parser.add_argument('--label_smoothing', '-ls', type=bool, default=False,
-                        help='whether the labels are smoothed, default: False')
-    parser.add_argument('--num_epochs', '-e', type=int, default=50,
+    parser.add_argument('-l', '--label_smoothing', action='store_true',
+                        help='whether the labels are smoothed')
+    parser.add_argument('-e', '--num_epochs', type=int, default=50,
                         help='number of runs over train data, default: 50')
-    parser.add_argument('--model', '-m', type=str, default='model.pt',
+    parser.add_argument('-m', '--model', type=str, default='model.pt',
                         help='path to save trained model, default: "model.pt"')
 
     # parse and print arguments
