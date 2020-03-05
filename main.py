@@ -94,7 +94,5 @@ if __name__ == '__main__':
              val_loader, val_writer,
              optimizer, scheduler,
              criterion,
-             args.num_epochs)
-
-    # save model to storage
-    torch.save(model.state_dict(), args.model)
+             args.num_epochs,
+             args.model)

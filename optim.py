@@ -75,8 +75,9 @@ def optimize(model,
              val_loader, val_writer,
              optimizer, scheduler,
              criterion,
-             num_epochs):
-    """Trains the model given train data and validates it given validation data.
+             num_epochs,
+             model_path):
+    """Trains and validates model and saves best-performing model.
 
     Args:
         model         = [nn.Module] model to train and validate
@@ -89,7 +90,9 @@ def optimize(model,
         scheduler     = [object] scheduler to update the learning rate
         criterion     = [nn.Module] neural network module to compute losses
         num_epochs    = [int] number of iterations over the train data set
+        model_path    = [str] path where trained model is saved
     """
+    high_score = 0
     for epoch in range(1, num_epochs + 1):
         # reset dataset for class balancing and to update augment probability
         train_dataset.reset(epoch)
@@ -102,3 +105,10 @@ def optimize(model,
 
         # update learning rate given validation score
         scheduler.step(val_score)
+
+        if val_score > high_score:
+            # save best-performing model to storage
+            torch.save(model.state_dict(), model_path)
+
+            # update high score
+            high_score = val_score
