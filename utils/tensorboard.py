@@ -8,14 +8,12 @@ class MetricWriter(SummaryWriter):
     """Class to periodically show metrics on TensorBoard.
 
     Attributes:
-        num_iterations = [int] number of iterations the model has been trained
         num_images     = [int] number of images the model has been trained on
         num_batches    = [int] number of batches since the metrics were shown
         pred_dict      = [dict] dictionary with all predictions from the model
         true_dict      = [dict] dictionary with all the true labels
         running_losses = [torch.Tensor] sub-problems and combined running losses
     """
-    num_iterations = 0
     num_images = 0
 
     def __init__(self, device, log_dir=None):
@@ -101,7 +99,7 @@ class MetricWriter(SummaryWriter):
             targets    = [tuple] sequence of tensors of targets
             losses     = [torch.Tensor] sub-problem losses and combined loss
             num_images = [int] number of unique images in current train batch
-            eval_freq  = [int] number of iterations before the next TensorBoard
+            eval_freq  = [int] number of batches before the next TensorBoard
                                update; if set to -1, TensorBoard never updates
             end        = [bool] always shows metrics after epoch has ended
 
@@ -110,7 +108,6 @@ class MetricWriter(SummaryWriter):
         """
         if not end:
             # increment total number of training images during run
-            MetricWriter.num_iterations += num_images > 0
             MetricWriter.num_images += num_images
 
             # increment number of batches to show metrics over
@@ -120,8 +117,8 @@ class MetricWriter(SummaryWriter):
             self._update_dicts(preds, targets)
             self.running_losses += losses.data
 
-        # show metrics every eval_freq images or at the end of an epoch
-        if self.num_iterations % eval_freq == (eval_freq - 1) or end:
+        # show metrics every eval_freq batches or at the end of an epoch
+        if self.num_batches == eval_freq or end:
             # show scores on TensorBoard
             scores = self._eval_metric()
             self._show_scores(scores)
