@@ -227,12 +227,14 @@ def load_data(images_path, labels_path, split, num_epochs, augment,
     train_images = np.load(images_path)
     train_labels = pd.read_csv(labels_path).iloc[:, 1:-1]
 
-    # train/validation split 80/20
-    train_images, val_images = train_test_split(train_images, test_size=split,
-                                                random_state=2020)
-    train_labels, val_labels = train_test_split(train_labels, test_size=split,
-                                                random_state=2020)
-    gc.collect()  # garbage collection
+    # train/validation split
+    train_images, val_images, train_labels, val_labels = train_test_split(
+                                                            train_images, 
+                                                            train_labels, 
+                                                            test_size=split,
+                                                            random_state=2020
+                                                         )
+    gc.collect() # garbage collection
 
     # training set
     train_dataset = BengaliDataset(train_images, train_labels, num_epochs,
