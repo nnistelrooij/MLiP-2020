@@ -2,20 +2,54 @@ import torch
 from tqdm import tqdm
 
 
-def validate(model, val_loader, val_writer, criterion):
-    """Computes loss and score of current state of model on validation data set.
+def train(model, train_loader, train_writer, optimizer, criterion, epoch):
+    """Update model weights given losses on train data batches.
+
+    Args:
+        model        = [nn.Module] model to train with train data set
+        train_loader = [DataLoader] train data loader
+        train_writer = [MetricWriter] TensorBoard writer of train metrics
+        optimizer    = [Optimizer] optimizer to update the model
+        criterion    = [nn.Module] neural network module to compute losses
+        epoch        = [int] current iteration over the train data set
+    """
+    for data in tqdm(train_loader, desc=f'Train Epoch {epoch}'):
+        x, t_graph, t_vowel, t_conso, num_augments = data
+
+        # predict
+        y = model(x, num_augments)
+
+        # loss
+        t = t_graph, t_vowel, t_conso
+        losses = criterion(y, t)
+
+        # update
+        optimizer.zero_grad()
+        losses[-1].backward()
+        optimizer.step()
+
+        # show train metrics every 100 iterations in TensorBoard
+        train_writer.show_metrics(y, t, losses, len(x))
+
+
+def validate(model, val_loader, val_writer, criterion, epoch):
+    """Computes losses and scores of current model on validation data.
 
     Args:
         model      = [nn.Module] model to test with validation data set
         val_loader = [DataLoader] validation data loader
         val_writer = [MetricWriter] TensorBoard writer of validation metrics
-        criterion  = [nn.Module] neural network module to compute loss
+        criterion  = [nn.Module] neural network module to compute losses
+        epoch      = [int] current iteration over the validation data set
+
+    Returns [float]:
+        Total score on the validation data set.
     """
     # set model mode to evaluation
     model.eval()
 
     with torch.no_grad():
-        for data in val_loader:
+        for data in tqdm(val_loader, desc=f'Validation Epoch {epoch}'):
             x, t_graph, t_vowel, t_conso, _ = data
 
             # predict
@@ -26,51 +60,55 @@ def validate(model, val_loader, val_writer, criterion):
             losses = criterion(y, t)
 
             # accumulate but do not show validation metrics
-            val_writer.show_metrics(losses, y, t, eval_freq=-1)
-
-    # show validation metrics on TensorBoard
-    val_writer.show_metrics(end=True)
+            val_writer.show_metrics(y, t, losses, eval_freq=-1)
 
     # set model mode back to training
     model.train()
 
+    # show validation metrics on TensorBoard
+    val_score = val_writer.show_metrics(end=True)
+    return val_score
 
-def train(model, train_dataset, train_loader, train_writer,
-          val_loader, val_writer, optimizer, criterion, num_epochs=50):
-    """Trains the model given train data and validates it given validation data.
+
+def optimize(model,
+             train_dataset, train_loader, train_writer,
+             val_loader, val_writer,
+             optimizer, scheduler,
+             criterion,
+             num_epochs,
+             model_path):
+    """Trains and validates model and saves best-performing model.
 
     Args:
         model         = [nn.Module] model to train and validate
         train_dataset = [BengaliDataset] train data set
         train_loader  = [DataLoader] train data loader
-        train_writer  = [SummaryWriter] TensorBoard writer of train metrics
+        train_writer  = [MetricWriter] TensorBoard writer of train metrics
         val_loader    = [DataLoader] validation data loader
         val_writer    = [SummaryWriter] TensorBoard writer of validation metrics
         optimizer     = [Optimizer] optimizer to update the model
-        criterion     = [nn.Module] neural network module to compute loss
+        scheduler     = [object] scheduler to update the learning rate
+        criterion     = [nn.Module] neural network module to compute losses
         num_epochs    = [int] number of iterations over the train data set
+        model_path    = [str] path where trained model is saved
     """
-    for epoch in range(num_epochs):
-        # reset dataset to keep class balance and update augment probability
-        train_dataset.reset(epoch)
+    high_score = 0
+    for epoch in range(1, num_epochs + 1):
+        # reset dataset for class balancing and to update augment probability
+        train_dataset.reset(epoch, num_epochs)
 
-        for data in tqdm(train_loader, desc=f'Epoch {epoch + 1}/{num_epochs}'):
-            x, t_graph, t_vowel, t_conso, num_augments = data
+        # update model weights given losses on train data
+        train(model, train_loader, train_writer, optimizer, criterion, epoch)
 
-            # predict
-            y = model(x, num_augments)
+        # determine total score of current model on validation data
+        val_score = validate(model, val_loader, val_writer, criterion, epoch)
 
-            # loss
-            t = t_graph, t_vowel, t_conso
-            losses = criterion(y, t)
+        # update learning rate given validation score
+        scheduler.step(val_score)
 
-            # update
-            optimizer.zero_grad()
-            losses[-1].backward()
-            optimizer.step()
+        if val_score > high_score:
+            # save best-performing model to storage
+            torch.save(model.state_dict(), model_path)
 
-            # show train metrics every 100 iterations in TensorBoard
-            train_writer.show_metrics(losses, y, t, len(x))
-
-        # evaluate model on validation data
-        validate(model, val_loader, val_writer, criterion)
+            # update high score
+            high_score = val_score

@@ -73,18 +73,16 @@ class BengaliDataset(Dataset):
                                         frequency by the highest frequency
         current_counts = [torch.Tensor] number of retrieved items of each
                                         class in current iteration of epoch
-        num_epochs     = [int] number of iterations over the train data set
         balance        = [bool] whether or not the classes are balanced
     """
 
-    def __init__(self, images, labels, num_epochs=1,
-                 augment=False, drop_info_fn=None, balance=False):
+    def __init__(self, images, labels, augment=False, drop_info_fn=None,
+                 balance=False):
         """Initialize dataset.
 
         Args:
             images       = [ndarray] images array with shape (N, SIZE, SIZE)
             labels       = [DataFrame] image labels DataFrame of shape (N, 3)
-            num_epochs   = [int] number of iterations over the train data set
             augment      = [bool] whether or not the images are transformed
             drop_info_fn = [str] whether to use cutout ('cutout'), GridMask
                                  ('gridmask'), or no info dropping algorithm
@@ -131,17 +129,17 @@ class BengaliDataset(Dataset):
         self.ratio_counts = torch.tensor(max_counts // counts)
         self.current_counts = torch.zeros_like(self.mod_counts)
 
-        self.num_epochs = num_epochs
         self.balance = balance
 
-    def reset(self, epoch):
+    def reset(self, epoch, num_epochs):
         """Reset class balancing and information dropping algorithms.
 
         Args:
-            epoch = [int] current epoch of the training loop starting with 0
+            epoch      = [int] current epoch of training loop starting with 1
+            num_epochs = [int] number of iterations over the train data set
         """
         self.current_counts = torch.zeros_like(self.mod_counts)
-        self.drop_info_fn.prob = min(epoch / self.num_epochs, 0.8)
+        self.drop_info_fn.prob = min(epoch / num_epochs, 0.8)
 
     def __len__(self):
         return len(self.images)
@@ -204,36 +202,37 @@ class BengaliDataset(Dataset):
         return (images,) + tuple(labels) + (num_augments.unsqueeze(0),)
 
 
-def load_data(images_path, labels_path, split, num_epochs, augment,
-              drop_info_fn, balance, batch_size):
+def load_data(images_path, labels_path, test_ratio, seed, augment, drop_info_fn,
+              balance, batch_size):
     """Load the images and labels from storage into DataLoader objects.
 
     Args:
         images_path  = [str] path for the images .npy file
         labels_path  = [str] path for the labels CSV file
-        split        = [float] percentage of data used for validation
-        num_epochs   = [int] number of iterations over the train data set
+        test_ratio   = [float] percentage of data used for validation
+        seed         = [int] seed used for consistent data splitting
         augment      = [bool] whether or not the images are transformed
         drop_info_fn = [str] whether to use cutout ('cutout'), GridMask
                              ('gridmask'), or no info dropping algorithm
         balance      = [bool] whether or not the classes are balanced
         batch_size   = [int] batch size of the DataLoader objects
 
-    Returns [BengaliDataset, DataLoader, DataLoader]:
+    Returns [BengaliDataset, DataLoader, DataLoader, int]:
         train_dataset = data set of the training data
         train_loader  = DataLoader of the training data
         val_loader    = DataLoader of the validation data
+        image_size    = length of square images in pixels
     """
-    train_images = np.load(images_path)
-    train_labels = pd.read_csv(labels_path).iloc[:, 1:-1]
+    images = np.load(images_path)
+    labels = pd.read_csv(labels_path).iloc[:, 1:-1]
 
-    # train/validation split 80/20
-    train_images, val_images = train_test_split(train_images, test_size=split)
-    train_labels, val_labels = train_test_split(train_labels, test_size=split)
-    gc.collect()  # garbage collection
+    # split data into train and validation splits
+    splitting = train_test_split(images, labels, test_size=test_ratio,
+                                 random_state=seed)
+    train_images, val_images, train_labels, val_labels = splitting
 
     # training set
-    train_dataset = BengaliDataset(train_images, train_labels, num_epochs,
+    train_dataset = BengaliDataset(train_images, train_labels,
                                    augment, drop_info_fn, balance)
     train_loader = DataLoader(train_dataset, shuffle=True, num_workers=4,
                               batch_size=batch_size, collate_fn=_cat_collate)
@@ -241,6 +240,6 @@ def load_data(images_path, labels_path, split, num_epochs, augment,
     # validation set
     val_dataset = BengaliDataset(val_images, val_labels)
     val_loader = DataLoader(val_dataset, batch_size=batch_size,
-                            num_workers=4,  collate_fn=_cat_collate)
+                            num_workers=4, collate_fn=_cat_collate)
 
-    return train_dataset, train_loader, val_loader
+    return train_dataset, train_loader, val_loader, images.shape[-1]
