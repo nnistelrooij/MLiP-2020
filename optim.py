@@ -95,7 +95,7 @@ def optimize(model,
     high_score = 0
     for epoch in range(1, num_epochs + 1):
         # reset dataset for class balancing and to update augment probability
-        train_dataset.reset(epoch)
+        train_dataset.reset(epoch, num_epochs)
 
         # update model weights given losses on train data
         train(model, train_loader, train_writer, optimizer, criterion, epoch)
