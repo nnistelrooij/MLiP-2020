@@ -189,6 +189,7 @@ class BengaliNet(nn.Module):
 
         # convolutional layer to get required number of channels
         self.conv1 = nn.Conv2d(1, 64, 5, padding=2, bias=False)
+        self.bn1 = nn.BatchNorm2d(64)
 
         # create large pre-trained ResNet model to generate image embeddings
         self.resnet18 = models.resnet18(pretrained=False)
