@@ -29,10 +29,11 @@ class ReduceLROnPlateau(object):
         self.best_metrics = [0]*4
         self.num_bad_epochs = [0]*4
 
-    def step(self, metrics):
+    def step(self, writer, metrics):
         """Update the learning rates for each parameter group given the metrics.
 
         Args:
+            writer  = [MetricWriter] TensorBoard writer of learning rates
             metrics = [float]*4 sub-problem and total scores on validation data
 
         Returns [bool]:
@@ -47,10 +48,12 @@ class ReduceLROnPlateau(object):
 
             # update learning rate of parameter group responsible for metric
             if self.num_bad_epochs[i] > self.patience:
-                param_group = self.optimizer.param_groups[i]
-                param_group['lr'] *= self.factor
-                print(f"Reducing LR of group {i} to {param_group['lr']}.")
+                self.optimizer.param_groups[i]['lr'] *= self.factor
                 self.num_bad_epochs[i] = 0
+
+        # show learning rates on TensorBoard
+        learning_rates = [pg['lr'] for pg in self.optimizer.param_groups]
+        writer.show_learning_rates(learning_rates)
 
         return self.best_metrics[-1] == metrics[-1]
 
@@ -156,6 +159,6 @@ def optimize(model,
         val_scores = validate(model, val_loader, val_writer, criterion, epoch)
 
         # update learning rates given validation scores
-        best_model = scheduler.step(val_scores)
+        best_model = scheduler.step(val_writer, val_scores)
         if best_model:  # save best-performing model to storage
             torch.save(model.state_dict(), model_path)
