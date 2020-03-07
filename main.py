@@ -3,12 +3,11 @@ from datetime import datetime
 import torch
 import argparse
 from torch.optim import Adam
-from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torchsummary import summary  # pip install torchsummary
 
 from nn import CrossEntropySumLoss, LabelSmoothingLoss
 from nn import ZeroNet, BengaliNet
-from optim import optimize
+from optim import ReduceLROnPlateau, optimize
 from utils.data import load_data
 from utils.tensorboard import MetricWriter
 
@@ -73,8 +72,13 @@ if __name__ == '__main__':
     summary(model, input_size=(1, image_size, image_size), device=str(device))
 
     # initialize optimizer, scheduler, and criterion
-    optimizer = Adam(model.parameters(), lr=0.001)
-    scheduler = ReduceLROnPlateau(optimizer, 'max', patience=5, verbose=True)
+    optimizer = Adam([
+        {'params': list(model.parameters())[-6:-4], 'lr': 0.001},
+        {'params': list(model.parameters())[-4:-2], 'lr': 0.001},
+        {'params': list(model.parameters())[-2:], 'lr': 0.001},
+        {'params': list(model.parameters())[:-6], 'lr': 0.001},
+    ])
+    scheduler = ReduceLROnPlateau(optimizer)
     if args.label_smoothing:
         criterion = LabelSmoothingLoss(device, 0.1)
     else:

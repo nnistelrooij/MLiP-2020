@@ -143,7 +143,7 @@ class BengaliDataset(Dataset):
     def __len__(self):
         return len(self.images)
 
-    def _num_augmentations(self, labels, max_augments=40):
+    def _num_augmentations(self, labels, max_augments=20):
         """Computes number of augmentations for given image labels.
 
         Args:
