@@ -179,16 +179,16 @@ class BengaliDataset(Dataset):
 
         Returns [torch.Tensor]*5:
             images       = images tensor of shape (N, 1, SIZE, SIZE)
-            labels_graph = labels tensor of grapheme_root subproblem
-            labels_vowel = labels tensor of vowel_diacritic subproblem
-            labels_conso = labels tensor of consonant_diacritic subproblem
+            labels_graph = labels tensor of grapheme_root sub-problem
+            labels_vowel = labels tensor of vowel_diacritic sub-problem
+            labels_conso = labels tensor of consonant_diacritic sub-problem
             num_augments = number of augmentations of shape (1, 3)
         """
         # select image and labels
         image = self.images[idx]
         labels = self.labels[idx]
 
-        # determine number of augmentations per subproblem
+        # determine number of augmentations per sub-problem
         num_augments = self._num_augmentations(labels)
 
         # transform or normalize image

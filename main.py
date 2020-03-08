@@ -6,7 +6,7 @@ from torch.optim import Adam
 from torchsummary import summary  # pip install torchsummary
 
 from nn import CrossEntropySumLoss, LabelSmoothingLoss
-from nn import ZeroNet, BengaliNet
+from nn import BengaliNet
 from optim import ReduceLROnPlateau, optimize
 from utils.data import load_data
 from utils.tensorboard import MetricWriter
@@ -15,7 +15,7 @@ from utils.tensorboard import MetricWriter
 def handle_arguments():
     """Handles input arguments. `python main.py --help` gives an overview."""
     # options for the information dropping algorithms
-    drop_info_fn = ['cutout', 'gridmask', 'None']
+    drop_info_fns = ['cutout', 'gridmask', 'None']
 
     # process the command options
     parser = argparse.ArgumentParser()
@@ -29,7 +29,7 @@ def handle_arguments():
                         'used for consistent data splitting, default: None')
     parser.add_argument('-a', '--data_augmentation', action='store_true',
                         help='whether the images are augmented')
-    parser.add_argument('-d', '--drop_info_fn', type=str, choices=drop_info_fn,
+    parser.add_argument('-d', '--drop_info_fn', type=str, choices=drop_info_fns,
                         default=None, help='whether cutout, GridMask, or no '
                         'information dropping algorithm is used, default: None')
     parser.add_argument('-c', '--class_balancing', action='store_true',

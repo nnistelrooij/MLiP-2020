@@ -95,10 +95,10 @@ class LabelSmoothingLoss(nn.Module):
 
 
 def _split_vectors(vectors, num_augments):
-    """Splits the latent vectors into tensors for each subproblem.
+    """Splits the latent vectors into tensors for each sub-problem.
 
     Splits the latent vectors according to the number of augmentations per
-    image for each subproblem. It returns three tensors that contain a
+    image for each sub-problem. It returns three tensors that contain a
     subset of the latent vectors in vecs to increase efficiency.
 
     Args:
@@ -108,18 +108,18 @@ def _split_vectors(vectors, num_augments):
 
     Returns [torch.Tensor]*3:
         The latent vectors for the grapheme_root, vowel_diacritic,
-        and consonant_diacritic subproblems.
+        and consonant_diacritic sub-problems.
     """
     if num_augments is None:
         return vectors, vectors, vectors
 
-    # determine the slices of the latent vectors for each subproblem
+    # determine the slices of the latent vectors for each sub-problem
     max_augments, _ = num_augments.max(dim=-1, keepdim=True)
     diffs = torch.cat((torch.tensor([[0]]), max_augments))
     start_indices = torch.cumsum(diffs, dim=0)[:-1]
     slices = torch.cat((start_indices, start_indices + num_augments), dim=-1)
 
-    # determine the indices of the latent vectors for each subproblem
+    # determine the indices of the latent vectors for each sub-problem
     graph = torch.cat([torch.arange(st, end) for st, end in slices[:, [0, 1]]])
     vowel = torch.cat([torch.arange(st, end) for st, end in slices[:, [0, 2]]])
     conso = torch.cat([torch.arange(st, end) for st, end in slices[:, [0, 3]]])
@@ -189,13 +189,10 @@ class BengaliNet(nn.Module):
 
         # convolutional layer to get required number of channels
         self.conv1 = nn.Conv2d(1, 64, 5, padding=2, bias=False)
-        self.bn1 = nn.BatchNorm2d(64)
 
         # create large pre-trained ResNet model to generate image embeddings
         self.resnet18 = models.resnet18(pretrained=False)
-        self.resnet18 = nn.Sequential(*list(self.resnet18.children())[2:-1])
-        # for param in self.resnet18.parameters():
-        #     param.requires_grad = False
+        self.resnet18 = nn.Sequential(*list(self.resnet18.children())[1:-1])
 
         # extra fully-connected layers to determine labels
         self.fc2 = nn.Linear(512, 168)
@@ -221,13 +218,12 @@ class BengaliNet(nn.Module):
 
         # get correct number of channels for ResNet50
         h = self.conv1(x)
-        h = self.bn1(h)
 
         # get latent vectors from ResNet50
         h = self.resnet18(h)
         h = h.flatten(start_dim=1)
 
-        # determine subproblem logits
+        # determine sub-problem logits
         h_graph, h_vowel, h_conso = _split_vectors(h, num_augments)
         y_graph = self.fc2(h_graph)
         y_vowel = self.fc3(h_vowel)

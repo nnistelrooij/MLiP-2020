@@ -117,21 +117,19 @@ class GridMask(DropInfo):
 
         # copy settings of image to mask
         image_size = image.size(-1)
-        mask = torch.ones_like(image)
+        mask = torch.zeros_like(image)
 
-        # remove columns
+        # remove columns from mask
         for x in range(delta_x - d, image_size, d):
             x_start = max(x, 0)
             x_end = max(x + l, 0)
-            mask[:, :, x_start:x_end] = 0
+            mask[:, :, x_start:x_end] = 1
 
-        # remove rows
+        # remove rows from mask
         for y in range(delta_y - d, image_size, d):
             y_start = max(y, 0)
             y_end = max(y + l, 0)
-            mask[:, y_start:y_end] = 0
+            mask[:, y_start:y_end] = 1
 
-        # squares that are left over will be removed
-        mask = 1 - mask
-
+        # squares that are left over will be removed from image
         return image * mask
