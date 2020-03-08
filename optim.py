@@ -14,7 +14,7 @@ class ReduceLROnPlateau(object):
         num_bad_epochs = number of consecutive epochs with worse metrics
     """
 
-    def __init__(self, optimizer, factor=0.1, patience=4):
+    def __init__(self, optimizer, factor=0.1, patience=5):
         """Initialize the learning rate scheduler.
 
         Args:
