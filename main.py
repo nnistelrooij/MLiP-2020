@@ -98,3 +98,6 @@ if __name__ == '__main__':
              criterion,
              args.num_epochs,
              args.model)
+
+    train_writer.close()
+    val_writer.close()
