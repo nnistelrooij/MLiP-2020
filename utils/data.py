@@ -95,7 +95,7 @@ class BengaliDataset(Dataset):
         if drop_info_fn == 'cutout':
             self.drop_info_fn = Cutout(2, 32)
         elif drop_info_fn == 'gridmask':
-            self.drop_info_fn = GridMask(0.6, 28, 64)
+            self.drop_info_fn = GridMask(0.5, 28, 64)
         else:
             self.drop_info_fn = DropInfo()
 
