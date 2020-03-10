@@ -2,6 +2,62 @@ import torch
 from tqdm import tqdm
 
 
+class ReduceLROnPlateau(object):
+    """Reduce learning rates when metrics have stopped improving.
+
+    Attributes:
+        optimizer      = [Optimizer] optimizer containing the learning rates
+        factor         = [float] factor by which the learning rates are reduced
+        patience       = [int] number of epochs with no improvement after
+            which the learning rates are reduced
+        best_metrics   = [list] best metrics observed thus far
+        num_bad_epochs = number of consecutive epochs with worse metrics
+    """
+
+    def __init__(self, optimizer, factor=0.1, patience=5):
+        """Initialize the learning rate scheduler.
+
+        Args:
+            optimizer = [Optimizer] optimizer containing the learning rates
+            factor    = [float] factor by which the learning rate is reduced
+            patience  = [int] number of epochs with no improvement after
+                which the learning rates are reduced
+        """
+        self.optimizer = optimizer
+        self.factor = factor
+        self.patience = patience
+        self.best_metrics = [0]*4
+        self.num_bad_epochs = [0]*4
+
+    def step(self, writer, metrics):
+        """Update the learning rates for each parameter group given the metrics.
+
+        Args:
+            writer  = [MetricWriter] TensorBoard writer of learning rates
+            metrics = [float]*4 sub-problem and total scores on validation data
+
+        Returns [bool]:
+            Whether the current model has achieved the highest total score.
+        """
+        for i in range(len(metrics)):
+            if self.best_metrics[i] < metrics[i]:
+                self.best_metrics[i] = metrics[i]
+                self.num_bad_epochs[i] = 0
+            else:
+                self.num_bad_epochs[i] += 1
+
+            # update learning rate of parameter group responsible for metric
+            if self.num_bad_epochs[i] > self.patience:
+                self.optimizer.param_groups[i]['lr'] *= self.factor
+                self.num_bad_epochs[i] = 0
+
+        # show learning rates on TensorBoard
+        learning_rates = [pg['lr'] for pg in self.optimizer.param_groups]
+        writer.show_learning_rates(learning_rates)
+
+        return self.best_metrics[-1] == metrics[-1]
+
+
 def train(model, train_loader, train_writer, optimizer, criterion, epoch):
     """Update model weights given losses on train data batches.
 
@@ -43,7 +99,7 @@ def validate(model, val_loader, val_writer, criterion, epoch):
         epoch      = [int] current iteration over the validation data set
 
     Returns [float]:
-        Total score on the validation data set.
+        Sub-problem and total scores on the validation data set.
     """
     # set model mode to evaluation
     model.eval()
@@ -66,8 +122,8 @@ def validate(model, val_loader, val_writer, criterion, epoch):
     model.train()
 
     # show validation metrics on TensorBoard
-    val_score = val_writer.show_metrics(end=True)
-    return val_score
+    val_scores = val_writer.show_metrics(end=True)
+    return val_scores
 
 
 def optimize(model,
@@ -92,7 +148,6 @@ def optimize(model,
         num_epochs    = [int] number of iterations over the train data set
         model_path    = [str] path where trained model is saved
     """
-    high_score = 0
     for epoch in range(1, num_epochs + 1):
         # reset dataset for class balancing and to update augment probability
         train_dataset.reset(epoch, num_epochs)
@@ -101,14 +156,9 @@ def optimize(model,
         train(model, train_loader, train_writer, optimizer, criterion, epoch)
 
         # determine total score of current model on validation data
-        val_score = validate(model, val_loader, val_writer, criterion, epoch)
+        val_scores = validate(model, val_loader, val_writer, criterion, epoch)
 
-        # update learning rate given validation score
-        scheduler.step(val_score)
-
-        if val_score > high_score:
-            # save best-performing model to storage
+        # update learning rates given validation scores
+        best_model = scheduler.step(val_writer, val_scores)
+        if best_model:  # save best-performing model to storage
             torch.save(model.state_dict(), model_path)
-
-            # update high score
-            high_score = val_score

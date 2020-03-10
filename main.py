@@ -3,12 +3,11 @@ from datetime import datetime
 import torch
 import argparse
 from torch.optim import Adam
-from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torchsummary import summary  # pip install torchsummary
 
 from nn import CrossEntropySumLoss, LabelSmoothingLoss
-from nn import ZeroNet, BengaliNet
-from optim import optimize
+from nn import BengaliNet
+from optim import ReduceLROnPlateau, optimize
 from utils.data import load_data
 from utils.tensorboard import MetricWriter
 
@@ -16,7 +15,7 @@ from utils.tensorboard import MetricWriter
 def handle_arguments():
     """Handles input arguments. `python main.py --help` gives an overview."""
     # options for the information dropping algorithms
-    drop_info_fn = ['cutout', 'gridmask', 'None']
+    drop_info_fns = ['cutout', 'gridmask', 'None']
 
     # process the command options
     parser = argparse.ArgumentParser()
@@ -30,7 +29,7 @@ def handle_arguments():
                         'used for consistent data splitting, default: None')
     parser.add_argument('-a', '--data_augmentation', action='store_true',
                         help='whether the images are augmented')
-    parser.add_argument('-d', '--drop_info_fn', type=str, choices=drop_info_fn,
+    parser.add_argument('-d', '--drop_info_fn', type=str, choices=drop_info_fns,
                         default=None, help='whether cutout, GridMask, or no '
                         'information dropping algorithm is used, default: None')
     parser.add_argument('-c', '--class_balancing', action='store_true',
@@ -73,8 +72,13 @@ if __name__ == '__main__':
     summary(model, input_size=(1, image_size, image_size), device=str(device))
 
     # initialize optimizer, scheduler, and criterion
-    optimizer = Adam(model.parameters(), lr=0.001)
-    scheduler = ReduceLROnPlateau(optimizer, 'max', patience=5, verbose=True)
+    optimizer = Adam([
+        {'params': list(model.parameters())[-6:-4], 'lr': 0.001},
+        {'params': list(model.parameters())[-4:-2], 'lr': 0.001},
+        {'params': list(model.parameters())[-2:], 'lr': 0.001},
+        {'params': list(model.parameters())[:-6], 'lr': 0.001},
+    ])
+    scheduler = ReduceLROnPlateau(optimizer)
     if args.label_smoothing:
         criterion = LabelSmoothingLoss(device, 0.1)
     else:
@@ -94,3 +98,6 @@ if __name__ == '__main__':
              criterion,
              args.num_epochs,
              args.model)
+
+    train_writer.close()
+    val_writer.close()

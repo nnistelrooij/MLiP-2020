@@ -1,4 +1,3 @@
-import gc
 import re
 
 import numpy as np
@@ -96,7 +95,7 @@ class BengaliDataset(Dataset):
         if drop_info_fn == 'cutout':
             self.drop_info_fn = Cutout(2, 32)
         elif drop_info_fn == 'gridmask':
-            self.drop_info_fn = GridMask(0.6, 28, 64)
+            self.drop_info_fn = GridMask(0.5, 28, 64)
         else:
             self.drop_info_fn = DropInfo()
 
@@ -144,19 +143,21 @@ class BengaliDataset(Dataset):
     def __len__(self):
         return len(self.images)
 
-    def _num_augmentations(self, labels):
+    def _num_augmentations(self, labels, max_augments=20):
         """Computes number of augmentations for given image labels.
 
         Args:
-            labels = [torch.Tensor] image labels of shape (3,)
+            labels       = [torch.Tensor] image labels of shape (3,)
+            max_augments = [int] maximum number of augmentations per image
 
         Returns [torch.Tensor]:
             If self.balance is False, a tensor filled with ones is returned.
             Otherwise, the number of augmentations will ensure that all the
-            classes are seen the same number of times for each subproblem.
+            classes are seen the same number of times for each sub-problem
+            with a maximum of max_augments augmentations per sub-problem.
         """
         if not self.balance:  # one augmentation
-            return torch.tensor([1] * len(labels))
+            return torch.tensor([1]*len(labels))
 
         # select current and modular counts for given labels
         current_counts = self.current_counts[[0, 1, 2], labels]
@@ -167,6 +168,7 @@ class BengaliDataset(Dataset):
         extra_augment = current_counts < mod_counts
         num_augments = self.ratio_counts[[0, 1, 2], labels] + extra_augment
 
+        num_augments = num_augments.clamp(max=max_augments)
         return num_augments.long()
 
     def __getitem__(self, idx):
@@ -177,16 +179,16 @@ class BengaliDataset(Dataset):
 
         Returns [torch.Tensor]*5:
             images       = images tensor of shape (N, 1, SIZE, SIZE)
-            labels_graph = labels tensor of grapheme_root subproblem
-            labels_vowel = labels tensor of vowel_diacritic subproblem
-            labels_conso = labels tensor of consonant_diacritic subproblem
+            labels_graph = labels tensor of grapheme_root sub-problem
+            labels_vowel = labels tensor of vowel_diacritic sub-problem
+            labels_conso = labels tensor of consonant_diacritic sub-problem
             num_augments = number of augmentations of shape (1, 3)
         """
         # select image and labels
         image = self.images[idx]
         labels = self.labels[idx]
 
-        # determine number of augmentations per subproblem
+        # determine number of augmentations per sub-problem
         num_augments = self._num_augmentations(labels)
 
         # transform or normalize image
@@ -196,7 +198,7 @@ class BengaliDataset(Dataset):
         images = torch.stack(images)
 
         # repeat labels given number of augmentations
-        labels = [labels[i].repeat(num_augments[i]) for i in range(len(labels))]
+        labels = [label.repeat(n) for label, n in zip(labels, num_augments)]
 
         # return images, labels, and number of augmentations as a 5-tuple
         return (images,) + tuple(labels) + (num_augments.unsqueeze(0),)

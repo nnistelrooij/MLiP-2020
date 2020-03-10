@@ -103,8 +103,11 @@ class MetricWriter(SummaryWriter):
                                update; if set to -1, TensorBoard never updates
             end        = [bool] always shows metrics after epoch has ended
 
-        Returns [float]:
-            Weighted average of component macro-averaged recalls.
+        Returns [float]*4:
+            grapheme  = grapheme_root component macro-average recall
+            vowel     = vowel_diacritic component macro-average recall
+            consonant = consonant_diacritic component macro-average recall
+            total     = weighted average of component macro-averaged recalls
         """
         if not end:
             # increment total number of training images during run
@@ -130,4 +133,19 @@ class MetricWriter(SummaryWriter):
             # reset running variables
             self._reset()
 
-            return scores[-1]
+            return scores
+
+    def show_learning_rates(self, learning_rates):
+        """Show learning rates in TensorBoard.
+
+        Args:
+            learning_rates = [float]*4 sub-problem and total learning rates
+        """
+        self.add_scalar('Learning Rate/grapheme_root',
+                        learning_rates[0], self.num_images)
+        self.add_scalar('Learning Rate/vowel_diacritic',
+                        learning_rates[1], self.num_images)
+        self.add_scalar('Learning Rate/consonant_diacritic',
+                        learning_rates[2], self.num_images)
+        self.add_scalar('Learning Rate/total',
+                        learning_rates[3], self.num_images)
