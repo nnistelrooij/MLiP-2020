@@ -92,10 +92,11 @@ class BengaliDataset(Dataset):
         self.images = images
 
         # initialize information dropping algorithm
+        image_size = images.shape[-1]
         if drop_info_fn == 'cutout':
-            self.drop_info_fn = Cutout(2, 32)
+            self.drop_info_fn = Cutout(1, image_size // 2)
         elif drop_info_fn == 'gridmask':
-            self.drop_info_fn = GridMask(0.5, 28, 64)
+            self.drop_info_fn = GridMask(0.5, image_size * 7 // 16, image_size)
         else:
             self.drop_info_fn = DropInfo()
 
