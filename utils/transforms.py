@@ -5,7 +5,7 @@ import torch
 
 
 class DropInfo(object):
-    """Class to inherent information dropping algorithms from.
+    """Class to inherit information dropping algorithms from.
 
     Attributes:
         prob = [float] probability of using information dropping algorithm
@@ -120,13 +120,13 @@ class GridMask(DropInfo):
         image_size = image.size(-1)
         mask = torch.zeros_like(image)
 
-        # add columns from mask
+        # add columns to mask
         for x in range(delta_x - d, image_size, d):
             x_start = max(x, 0)
             x_end = max(x + l, 0)
             mask[:, :, x_start:x_end] = 1
 
-        # add rows from mask
+        # add rows to mask
         for y in range(delta_y - d, image_size, d):
             y_start = max(y, 0)
             y_end = max(y + l, 0)

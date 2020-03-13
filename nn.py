@@ -21,15 +21,15 @@ class CrossEntropySumLoss(nn.Module):
         self.device = device
 
     def forward(self, input, target):
-        """Sums cross-entropy losses of given predictions and targets.
+        """Sums cross-entropy losses of given predictions and hard targets.
 
         Args:
             input  = [tuple] sequence of tensors of (raw) predictions
-            target = [tuple] sequence of tensors of targets
+            target = [tuple] sequence of tensors of hard targets
 
         Returns [torch.Tensor]:
             The grapheme_root, vowel_dacritic, consonant_diacritic,
-            and combined losses, given the predictions and targets.
+            and combined losses, given the predictions and hard targets.
         """
         losses = []
         for y, t in zip(input, target):
@@ -149,7 +149,6 @@ class ZeroNet(nn.Module):
         """
         super(ZeroNet, self).__init__()
 
-        # images are 128 * 128
         # input channels 1, output channels 10
         self.conv1 = nn.Conv2d(1, 10, kernel_size=kernel_size)
 

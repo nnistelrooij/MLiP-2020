@@ -141,7 +141,7 @@ def optimize(model,
         train_loader  = [DataLoader] train data loader
         train_writer  = [MetricWriter] TensorBoard writer of train metrics
         val_loader    = [DataLoader] validation data loader
-        val_writer    = [SummaryWriter] TensorBoard writer of validation metrics
+        val_writer    = [MetricWriter] TensorBoard writer of validation metrics
         optimizer     = [Optimizer] optimizer to update the model
         scheduler     = [object] scheduler to update the learning rates
         criterion     = [nn.Module] neural network module to compute losses
