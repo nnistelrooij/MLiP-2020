@@ -200,9 +200,9 @@ class BengaliNet(nn.Module):
     Attributes:
         conv1    = [nn.Module] first convolutional layer
         resnet18 = [nn.Module] non-pretrained layers of ResNet-18 architecture
-        fc2      = [nn.Module] first fully-connected layer
-        fc3      = [nn.Module] second fully-connected layer
-        fc4      = [nn.Module] third fully-connected layer
+        fc1      = [nn.Module] first fully-connected layer
+        fc2      = [nn.Module] second fully-connected layer
+        fc3      = [nn.Module] third fully-connected layer
         device   = [torch.device] device to compute the predictions on
     """
 
@@ -217,9 +217,9 @@ class BengaliNet(nn.Module):
         self.resnet18 = nn.Sequential(*list(self.resnet18.children())[1:-1])
 
         # extra fully-connected layers to determine labels
-        self.fc2 = nn.Linear(512, 168)
-        self.fc3 = nn.Linear(512, 11)
-        self.fc4 = nn.Linear(512, 7)
+        self.fc1 = nn.Linear(512, 168)
+        self.fc2 = nn.Linear(512, 11)
+        self.fc3 = nn.Linear(512, 7)
 
         # put model on GPU
         self.device = device
@@ -248,7 +248,7 @@ class BengaliNet(nn.Module):
 
         # determine predictions for each sub-problem
         h_graph, h_vowel, h_conso = _split_vectors(h, num_augments)
-        y_graph = self.fc2(h_graph)
-        y_vowel = self.fc3(h_vowel)
-        y_conso = self.fc4(h_conso)
+        y_graph = self.fc1(h_graph)
+        y_vowel = self.fc2(h_vowel)
+        y_conso = self.fc3(h_conso)
         return y_graph, y_vowel, y_conso
