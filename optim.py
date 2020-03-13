@@ -10,8 +10,8 @@ class ReduceLROnPlateau(object):
         factor         = [float] factor by which the learning rates are reduced
         patience       = [int] number of epochs with no improvement after
             which the learning rates are reduced
-        best_metrics   = [list] best metrics observed thus far
-        num_bad_epochs = number of consecutive epochs with worse metrics
+        best_metrics   = [float]*4 best metrics observed thus far
+        num_bad_epochs = [int]*4 number of consecutive epochs with worse metrics
     """
 
     def __init__(self, optimizer, factor=0.1, patience=5):
@@ -67,7 +67,7 @@ def train(model, train_loader, train_writer, optimizer, criterion, epoch):
         train_writer = [MetricWriter] TensorBoard writer of train metrics
         optimizer    = [Optimizer] optimizer to update the model
         criterion    = [nn.Module] neural network module to compute losses
-        epoch        = [int] current iteration over the train data set
+        epoch        = [int] current iteration over the training data set
     """
     for data in tqdm(train_loader, desc=f'Train Epoch {epoch}'):
         x, t_graph, t_vowel, t_conso, num_augments = data
@@ -84,7 +84,7 @@ def train(model, train_loader, train_writer, optimizer, criterion, epoch):
         losses[-1].backward()
         optimizer.step()
 
-        # show train metrics every 100 iterations in TensorBoard
+        # show train metrics every 100 batches in TensorBoard
         train_writer.show_metrics(y, t, losses, len(x))
 
 
@@ -96,9 +96,9 @@ def validate(model, val_loader, val_writer, criterion, epoch):
         val_loader = [DataLoader] validation data loader
         val_writer = [MetricWriter] TensorBoard writer of validation metrics
         criterion  = [nn.Module] neural network module to compute losses
-        epoch      = [int] current iteration over the validation data set
+        epoch      = [int] current iteration over the training data set
 
-    Returns [float]:
+    Returns [float]*4:
         Sub-problem and total scores on the validation data set.
     """
     # set model mode to evaluation
@@ -143,9 +143,9 @@ def optimize(model,
         val_loader    = [DataLoader] validation data loader
         val_writer    = [SummaryWriter] TensorBoard writer of validation metrics
         optimizer     = [Optimizer] optimizer to update the model
-        scheduler     = [object] scheduler to update the learning rate
+        scheduler     = [object] scheduler to update the learning rates
         criterion     = [nn.Module] neural network module to compute losses
-        num_epochs    = [int] number of iterations over the train data set
+        num_epochs    = [int] number of iterations over the training data
         model_path    = [str] path where trained model is saved
     """
     for epoch in range(1, num_epochs + 1):
@@ -155,7 +155,7 @@ def optimize(model,
         # update model weights given losses on train data
         train(model, train_loader, train_writer, optimizer, criterion, epoch)
 
-        # determine total score of current model on validation data
+        # determine scores on sub-problems and total score on validation data
         val_scores = validate(model, val_loader, val_writer, criterion, epoch)
 
         # update learning rates given validation scores

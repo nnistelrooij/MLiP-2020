@@ -1,22 +1,32 @@
+import argparse
 from datetime import datetime
 
 import torch
-import argparse
 from torch.optim import Adam
 from torchsummary import summary  # pip install torchsummary
 
-from nn import CrossEntropySumLoss, LabelSmoothingLoss
-from nn import BengaliNet
-from optim import ReduceLROnPlateau, optimize
+from nn import BengaliNet, CrossEntropySumLoss, LabelSmoothingLoss
+from optim import optimize, ReduceLROnPlateau
 from utils.data import load_data
 from utils.tensorboard import MetricWriter
 
 
 def handle_arguments():
-    """Handles input arguments. `python main.py --help` gives an overview."""
-    # options for the information dropping algorithms
-    drop_info_fns = ['cutout', 'gridmask', 'None']
+    """Handles console arguments. `python main.py --help` gives an overview.
 
+    Returns [Namespace]:
+        images            = [str] path to images .npy file
+        labels            = [str] path to labels CSV file
+        test_ratio        = [float] proportion of data for testing
+        seed              = [int] seed used for data splitting
+        data_augmentation = [bool] whether to augment the training images
+        drop_info_fn      = [str] which info dropping algorithm to use
+        class_balancing   = [bool] whether to perform class balancing
+        batch_size        = [int] number of images in a batch
+        label_smoothing   = [bool] whether to use soft targets for the loss
+        epochs            = [int] number of iterations over the training data
+        model             = [str] path to save the trained model
+    """
     # process the command options
     parser = argparse.ArgumentParser()
     parser.add_argument('images', type=str, help='provide path in style: '
@@ -28,18 +38,19 @@ def handle_arguments():
     parser.add_argument('-s', '--seed', type=int, default=None, help='seed '
                         'used for consistent data splitting, default: None')
     parser.add_argument('-a', '--data_augmentation', action='store_true',
-                        help='whether the images are augmented')
+                        help='switch to augment the images')
+    drop_info_fns = ['cutout', 'gridmask', 'None']  # info dropping algorithms
     parser.add_argument('-d', '--drop_info_fn', type=str, choices=drop_info_fns,
                         default=None, help='whether cutout, GridMask, or no '
                         'information dropping algorithm is used, default: None')
     parser.add_argument('-c', '--class_balancing', action='store_true',
-                        help='whether the classes are balanced')
+                        help='switch to perform class balancing')
     parser.add_argument('-b', '--batch_size', type=int, default=32,
                         help='batch size of DataLoader objects, default: 32')
     parser.add_argument('-l', '--label_smoothing', action='store_true',
-                        help='whether the labels are smoothed')
-    parser.add_argument('-e', '--num_epochs', type=int, default=50,
-                        help='number of runs over train data, default: 50')
+                        help='switch to use soft targets in loss computation')
+    parser.add_argument('-e', '--epochs', type=int, default=50, help='number '
+                        'of iterations over training data, default: 50')
     parser.add_argument('-m', '--model', type=str, default='model.pt',
                         help='path to save trained model, default: "model.pt"')
 
@@ -52,6 +63,7 @@ def handle_arguments():
   
 
 if __name__ == '__main__':
+    # get console arguments
     args = handle_arguments()
 
     # load training and validation data
@@ -65,7 +77,7 @@ if __name__ == '__main__':
 
     # use GPU if available
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print('Device:', device)
+    print('DEVICE:', device)
 
     # initialize network and show summary
     model = BengaliNet(device).train()
@@ -96,8 +108,9 @@ if __name__ == '__main__':
              val_loader, val_writer,
              optimizer, scheduler,
              criterion,
-             args.num_epochs,
+             args.epochs,
              args.model)
 
+    # close TensorBoard writers to flush communication
     train_writer.close()
     val_writer.close()

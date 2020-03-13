@@ -65,14 +65,14 @@ class BengaliDataset(Dataset):
         images         = [ndarray] images array with shape (N, SIZE, SIZE)
         drop_info_fn   = [object] function to drop information from images
         transform      = [Compose] transformation applied to each image
-        labels         = [torch.Tensor] images labels tensor of shape (N, 3)
+        labels         = [torch.Tensor] image labels tensor of shape (N, 3)
         mod_counts     = [torch.Tensor] remainders of dividing each class
-                                        frequency by the highest frequency
+            frequency by the highest frequency
         ratio_counts   = [torch.Tensor] floors of dividing each class
-                                        frequency by the highest frequency
+            frequency by the highest frequency
         current_counts = [torch.Tensor] number of retrieved items of each
-                                        class in current iteration of epoch
-        balance        = [bool] whether or not the classes are balanced
+            class in current iteration of epoch
+        balance        = [bool] whether or not to perform class balancing
     """
 
     def __init__(self, images, labels, augment=False, drop_info_fn=None,
@@ -82,9 +82,9 @@ class BengaliDataset(Dataset):
         Args:
             images       = [ndarray] images array with shape (N, SIZE, SIZE)
             labels       = [DataFrame] image labels DataFrame of shape (N, 3)
-            augment      = [bool] whether or not the images are transformed
+            augment      = [bool] whether or not the images are augmented
             drop_info_fn = [str] whether to use cutout ('cutout'), GridMask
-                                 ('gridmask'), or no info dropping algorithm
+                ('gridmask'), or no info dropping algorithm (None)
             balance      = [bool] whether or not the classes are balanced
         """
         super(Dataset, self).__init__()
@@ -136,7 +136,7 @@ class BengaliDataset(Dataset):
 
         Args:
             epoch      = [int] current epoch of training loop starting with 1
-            num_epochs = [int] number of iterations over the train data set
+            num_epochs = [int] total number of iterations over the training data
         """
         self.current_counts = torch.zeros_like(self.mod_counts)
         self.drop_info_fn.prob = min(epoch / num_epochs, 0.8)
@@ -154,7 +154,7 @@ class BengaliDataset(Dataset):
         Returns [torch.Tensor]:
             If self.balance is False, a tensor filled with ones is returned.
             Otherwise, the number of augmentations will ensure that all the
-            classes are seen the same number of times for each sub-problem
+            classes are seen the same number of times for each sub-problem,
             with a maximum of max_augments augmentations per sub-problem.
         """
         if not self.balance:  # one augmentation
@@ -216,15 +216,15 @@ def load_data(images_path, labels_path, test_ratio, seed, augment, drop_info_fn,
         seed         = [int] seed used for consistent data splitting
         augment      = [bool] whether or not the images are transformed
         drop_info_fn = [str] whether to use cutout ('cutout'), GridMask
-                             ('gridmask'), or no info dropping algorithm
+            ('gridmask'), or no info dropping algorithm (None)
         balance      = [bool] whether or not the classes are balanced
         batch_size   = [int] batch size of the DataLoader objects
 
-    Returns [BengaliDataset, DataLoader, DataLoader, int]:
-        train_dataset = data set of the training data
-        train_loader  = DataLoader of the training data
-        val_loader    = DataLoader of the validation data
-        image_size    = length of square images in pixels
+    Returns:
+        train_dataset = [BengaliDataset] data set of the training data
+        train_loader  = [DataLoader] DataLoader of the training data
+        val_loader    = [DataLoader] DataLoader of the validation data
+        image_size    = [int] length of square images in pixels
     """
     images = np.load(images_path)
     labels = pd.read_csv(labels_path).iloc[:, 1:-1]

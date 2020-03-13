@@ -3,17 +3,6 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-HEIGHT = 137
-WIDTH = 236
-SIZE = 64
-BATCH_SIZE = 512
-
-TRAIN = ['kaggle/input/bengaliai-cv19/train_image_data_0.parquet',
-         'kaggle/input/bengaliai-cv19/train_image_data_1.parquet',
-         'kaggle/input/bengaliai-cv19/train_image_data_2.parquet',
-         'kaggle/input/bengaliai-cv19/train_image_data_3.parquet']
-OUT_TRAIN = f'train_image_data_{SIZE}.npy'
-
 
 def normalize(df):
     """Normalize the given images.
@@ -108,6 +97,17 @@ def crop_pad_resize(images, bboxes, size=SIZE, pad=16):
     return np.stack(images_cropped_padded_resized)
 
 
+HEIGHT = 137
+WIDTH = 236
+SIZE = 128
+BATCH_SIZE = 512
+
+TRAIN = ['kaggle/input/bengaliai-cv19/train_image_data_0.parquet',
+         'kaggle/input/bengaliai-cv19/train_image_data_1.parquet',
+         'kaggle/input/bengaliai-cv19/train_image_data_2.parquet',
+         'kaggle/input/bengaliai-cv19/train_image_data_3.parquet']
+OUT_TRAIN = f'train_image_data_{SIZE}.npy'
+
 if __name__ == '__main__':
     preprocessed_train_images = []
     for file_name in TRAIN:
@@ -128,7 +128,7 @@ if __name__ == '__main__':
     # put all processed images in one big ndarray
     preprocessed_train_images = np.concatenate(preprocessed_train_images)
 
-    # determine mean and std for normalization purposes
+    # determine mean and standard deviation for normalization purposes
     mean = preprocessed_train_images.mean()
     std = preprocessed_train_images.std()
     print(f'Mean: {mean}\tStandard Deviation: {std}')
