@@ -3,4 +3,3 @@ runs/
 .idea/
 .ipynb_checkpoints/
 *__pycache__/
-model.pt

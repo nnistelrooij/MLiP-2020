@@ -20,7 +20,7 @@ class MetricWriter(SummaryWriter):
         """Initialize this class as subclass of SummaryWriter.
 
         Args:
-            device  = [torch.device] device to compute the loss on
+            device  = [torch.device] device to compute the running loss on
             log_dir = [str] directory to store the metrics during the run
         """
         super(MetricWriter, self).__init__(log_dir)
@@ -43,9 +43,9 @@ class MetricWriter(SummaryWriter):
         describes the weighted average of component macro-averaged recalls.
 
         Returns [float]*4:
-            grapheme  = grapheme_root component macro-average recall
-            vowel     = vowel_diacritic component macro-average recall
-            consonant = consonant_diacritic component macro-average recall
+            grapheme  = grapheme_root component macro-averaged recall
+            vowel     = vowel_diacritic component macro-averaged recall
+            consonant = consonant_diacritic component macro-averaged recall
             total     = weighted average of component macro-averaged recalls
         """
         scores = []
@@ -97,16 +97,16 @@ class MetricWriter(SummaryWriter):
         Args:
             preds      = [tuple] sequence of tensors of (raw) predictions
             targets    = [tuple] sequence of tensors of targets
-            losses     = [torch.Tensor] sub-problem losses and combined loss
+            losses     = [torch.Tensor] sub-problem and combined losses
             num_images = [int] number of unique images in current train batch
             eval_freq  = [int] number of batches before the next TensorBoard
-                               update; if set to -1, TensorBoard never updates
+                update; if set to -1, TensorBoard never updates
             end        = [bool] always shows metrics after epoch has ended
 
         Returns [float]*4:
-            grapheme  = grapheme_root component macro-average recall
-            vowel     = vowel_diacritic component macro-average recall
-            consonant = consonant_diacritic component macro-average recall
+            grapheme  = grapheme_root component macro-averaged recall
+            vowel     = vowel_diacritic component macro-averaged recall
+            consonant = consonant_diacritic component macro-averaged recall
             total     = weighted average of component macro-averaged recalls
         """
         if not end:

@@ -5,7 +5,7 @@ import torch
 
 
 class DropInfo(object):
-    """Class to inherent information dropping algorithms from.
+    """Class to inherit information dropping algorithms from.
 
     Attributes:
         prob = [float] probability of using information dropping algorithm
@@ -46,7 +46,8 @@ class Cutout(DropInfo):
             image = [torch.Tensor] image of shape (1, size, size)
 
         Returns [torch.Tensor]:
-            Image with num_squares of dimension length x length cut out of it.
+            Image with num_squares squares of dimension (length, length) cut
+            out of it with probability prob.
         """
         if self.prob < random.random():
             return image
@@ -119,17 +120,17 @@ class GridMask(DropInfo):
         image_size = image.size(-1)
         mask = torch.zeros_like(image)
 
-        # remove columns from mask
+        # add columns to mask
         for x in range(delta_x - d, image_size, d):
             x_start = max(x, 0)
             x_end = max(x + l, 0)
             mask[:, :, x_start:x_end] = 1
 
-        # remove rows from mask
+        # add rows to mask
         for y in range(delta_y - d, image_size, d):
             y_start = max(y, 0)
             y_end = max(y + l, 0)
             mask[:, y_start:y_end] = 1
 
-        # squares that are left over will be removed from image
+        # left over black squares will be removed from image
         return image * mask
