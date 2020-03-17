@@ -6,6 +6,39 @@ from tqdm import tqdm
 from nn import BengaliNet
 from utils.preprocess import preprocess
 
+
+def test(model, test_images, transform, batch_size=192):
+    """Test the model by predicting classes of unseen images.
+
+    Args:
+        model       = [nn.Module] model to test with validation data set
+        test_images = [ndarray] unseen images of which classes will be predicted
+        transform   = [Compose] transformation applied to each image
+        batch_size  = [int] number of images per mini-batch
+
+    Returns [list]:
+        Predictions as integers for each test image in a flattened list with
+        sub-problem order consonant, grapheme, vowel.
+    """
+    predictions = []
+    with torch.no_grad():
+        for batch_idx in tqdm(range(0, len(test_images), batch_size)):
+            # select batch of images to process and normalize them
+            batch = test_images[batch_idx:batch_idx + batch_size]
+            x = torch.stack([transform(image) for image in batch])
+
+            # predict class of each sub-problem for each image in batch
+            y = model(x)
+
+            # prepare predictions for Kaggle submission
+            preds = [y[i].argmax(dim=-1) for i in [2, 0, 1]]
+            preds = torch.stack(preds, dim=1).flatten()
+
+            predictions += preds.tolist()
+
+    return predictions
+
+
 if __name__ == '__main__':
     # preprocess test images
     test_files = ['kaggle/input/bengaliai-cv19/test_image_data_0.parquet',
@@ -27,19 +60,7 @@ if __name__ == '__main__':
     ])
 
     # determine predictions of model on test images
-    predictions = []
-    batch_size = 128
-    for batch_idx in tqdm(range(0, len(preprocessed_test_images), batch_size)):
-        # select batch of images to process and normalize them
-        batch = preprocessed_test_images[batch_idx:batch_idx + batch_size]
-        x = torch.stack([transform(image) for image in batch])
-
-        # predict class of each sub-problem for each image in batch
-        y = model(x)
-        preds = [pred.argmax(dim=1).tolist() for pred in y]
-
-        for grapheme, vowel, consonant in zip(*preds):
-            predictions += [consonant, grapheme, vowel]
+    predictions = test(model, preprocessed_test_images, transform)
 
     # save predictions to submission CSV file
     submission_df = pd.read_csv(
