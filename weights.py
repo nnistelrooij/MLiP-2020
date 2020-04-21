@@ -82,7 +82,7 @@ def loss_weights(path):
 
 
 if __name__ == '__main__':
-    loss_weights(
+    weights = loss_weights(
         r'D:\Users\Niels-laptop\Documents\2019-2020\Machine Learning in '
         r'Practice\Competition 2\project'
     )
