@@ -1,30 +1,35 @@
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import torch
 
-sales = pd.read_csv(
-    r'D:\Users\Niels-laptop\Documents\2019-2020\Machine Learning '
-    r'in Practice\Competition 2\project\sales_train_validation.csv'
-)
-sales = sales.iloc[:, list(range(1, 6)) + list(range(sales.shape[1]))[-28:]]
-sales = pd.wide_to_long(sales, stubnames='d_', i=['store_id', 'item_id'], j='d')
-sales = sales.reset_index()
-sales['d'] = sales['d'].map(lambda x: f'd_{x}')
 
-cal = pd.read_csv(
-    r'D:\Users\Niels-laptop\Documents\2019-2020\Machine Learning '
-    r'in Practice\Competition 2\project\calendar.csv'
-)
-cal = cal[['wm_yr_wk', 'd']]
+def load_data(path):
+    sales = pd.read_csv(path / 'sales_train_validation.csv')
+    sales = sales[sales.columns[1:6].union(sales.columns[-28:])]
+    sales = pd.wide_to_long(sales, 'd_', i=['store_id', 'item_id'], j='d')
+    sales = sales.reset_index()
+    sales['d'] = sales['d'].map(lambda x: f'd_{x}')
 
-prices = pd.read_csv(
-    r'D:\Users\Niels-laptop\Documents\2019-2020\Machine '
-    r'Learning in Practice\Competition 2\project\sell_prices.csv'
-)
+    cal = pd.read_csv(path / 'calendar.csv')
+    cal = cal[['wm_yr_wk', 'd']]
+
+    prices = pd.read_csv(path / 'sell_prices.csv')
+
+    data = sales.merge(cal)
+    data = data.merge(prices)
+    data = data.sort_values(by=['store_id', 'item_id', 'd'])
+    data.index = range(data.shape[0])
+    data['revenue'] = data['d_'] * data['sell_price']
+    data['total'] = 'TOTAL'
+
+    return data
 
 
 def level_indices(df):
-    indices = []
+    permutations = []
+    group_indices = []
 
     groups1 = ['state_id', 'store_id', 'cat_id', 'dept_id', 'item_id', 'total']
     groups2 = [['', ' cat_id', ' dept_id', ' item_id']]*2 + [['']]*4
@@ -36,24 +41,24 @@ def level_indices(df):
             permutation = list(groups.indices.values())
             permutation.sort(key=lambda x: x[0])
 
-            group_sizes = [len(group) for group in permutation]
-            group_indices = np.cumsum(group_sizes) - 1
+            group_sizes = [0] + [len(group) for group in permutation]
+            group_start_indices = np.cumsum(group_sizes)[:-1]
+            group_indices.append(group_start_indices)
 
             permutation = np.concatenate(permutation)
-            indices.append((permutation, group_indices))
+            permutations.append(permutation)
 
-    return indices
+    return permutations, group_indices
 
 
-def aggregate(revenues, indices):
-    revenues = torch.tensor(revenues['revenue'].to_numpy())
+def aggregate(revenues, permutations, group_indices):
+    revenues = revenues['revenue'].to_numpy()
     aggregates = []
-    for permutation, group_indices in indices:
+    for permutation, group_start_indices in zip(permutations, group_indices):
         permutation = revenues[permutation]
-        sums1 = permutation.cumsum(0)[group_indices]
-        sums2 = torch.cat((torch.zeros_like(revenues[:1]), sums1[:-1]))
+        sums = np.add.reduceat(permutation, group_start_indices)
 
-        aggregates.append(sums1 - sums2)
+        aggregates.append(sums)
 
     return aggregates
 
@@ -64,16 +69,20 @@ def level_weights(aggregates):
     for level in aggregates:
         weights.append(level / total)
 
-    return torch.cat(weights)
+    return np.concatenate(weights)
 
 
-data = sales.merge(cal)
-data = data.merge(prices)
-data = data.sort_values(by=['store_id', 'item_id', 'd'])
-data.index = range(data.shape[0])
-data['revenue'] = data['d_'] * data['sell_price']
-data['total'] = 'TOTAL'
+def loss_weights(path):
+    data = load_data(Path(path))
+    permutations, group_indices = level_indices(data)
+    aggregates = aggregate(data, permutations, group_indices)
+    weights = level_weights(aggregates)
 
-indices = level_indices(data)
-aggregates = aggregate(data, indices)
-weights = level_weights(aggregates)
+    return torch.tensor(weights)
+
+
+if __name__ == '__main__':
+    loss_weights(
+        r'D:\Users\Niels-laptop\Documents\2019-2020\Machine Learning in '
+        r'Practice\Competition 2\project'
+    )

@@ -4,7 +4,8 @@ import torch
 
 
 def level_indices(df):
-    indices = []
+    permutations = []
+    group_indices = []
 
     groups1 = ['state_id', 'store_id', 'cat_id', 'dept_id', 'item_id', 'total']
     groups2 = [['', ' cat_id', ' dept_id', ' item_id']]*2 + [['']]*4
@@ -17,33 +18,38 @@ def level_indices(df):
             permutation.sort(key=lambda x: x[0])
 
             group_sizes = [len(group) for group in permutation]
-            group_indices = np.cumsum(group_sizes) - 1
+            group_end_indices = np.cumsum(group_sizes) - 1
+            group_indices.append(group_end_indices)
 
             permutation = np.concatenate(permutation)
-            indices.append((permutation, group_indices))
+            permutations.append(permutation)
 
-    return indices
+    return permutations, group_indices
 
 
-def aggregate(sales, indices):
+def aggregate(sales, permutations, group_indices):
     aggregates = []
-    for permutation, group_indices in indices:
+    for permutation, group_end_indices in zip(permutations, group_indices):
         permutation = sales[permutation]
-        sums1 = permutation.cumsum(0)[group_indices]
+        sums1 = permutation.cumsum(0)[group_end_indices]
         sums2 = torch.cat((torch.zeros_like(sales[:1]), sums1[:-1]))
 
         aggregates.append(sums1 - sums2)
 
-    return aggregates
+    return torch.cat(aggregates)
 
 
-sales = pd.read_csv(
-    r'D:\Users\Niels-laptop\Documents\2019-2020\Machine Learning '
-    r'in Practice\Competition 2\project\sales_train_validation.csv'
-)
-sales['total'] = 'TOTAL'
+if __name__ == '__main__':
+    sales = pd.read_csv(
+        r'D:\Users\Niels-laptop\Documents\2019-2020\Machine Learning '
+        r'in Practice\Competition 2\project\sales_train_validation.csv'
+    )
+    sales = sales.iloc[:, 1:6]
+    sales = sales.sort_values(by=['store_id', 'item_id'])
+    sales.index = range(sales.shape[0])
+    sales['total'] = 'TOTAL'
 
-indices = level_indices(sales)
+    permutations, group_indices = level_indices(sales)
 
-tensor = torch.rand(30490, device=torch.device('cuda'), requires_grad=True)
-aggregates = aggregate(tensor, indices)
+    tensor = torch.rand(30490, 3)
+    aggregates = aggregate(tensor, permutations, group_indices)
