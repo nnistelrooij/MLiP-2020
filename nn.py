@@ -1,254 +1,204 @@
+import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torchvision import models
 
 
-class CrossEntropySumLoss(nn.Module):
-    """Neural network module to compute sum of cross-entropy losses.
+class WRMSSE(nn.Module):
+    """Weighted Root Mean Squared Scaled Error used for loss module."""
+    _id_columns = ['state_id', 'store_id', 'cat_id', 'dept_id', 'item_id']
 
-    Attributes:
-        device = [torch.device] device to compute the loss on
-    """
-
-    def __init__(self, device):
-        """Initializes the loss module.
+    def __init__(self, device, calendar, prices, sales):
+        """Initializes WRMSSE loss module.
 
         Args:
-            device = [torch.device] device to compute the loss on
+            device   = [torch.device] device to compute the loss on
+            calendar = [pd.DataFrame] table with data on each date
+            prices   = [pd.DataFrame] table with average sell prices each week
+            sales    = [pd.DataFrame] table with sales per item for each day
         """
-        super(CrossEntropySumLoss, self).__init__()
-        self.device = device
+        super(WRMSSE, self).__init__()
 
-    def forward(self, input, target):
-        """Sums cross-entropy losses of given predictions and hard targets.
+        self._device = device
+
+        sales = sales.sort_values(by=['store_id', 'item_id'])
+        sales.index = range(sales.shape[0])
+        self._permutations, self._group_indices = self._indices(sales)
+
+        self._scales = self._time_series_scales(sales)
+        self._weights = self._time_series_weights(calendar, prices, sales)
+
+    def _time_series_scales(self, sales):
+        """Computes the scale of each time series.
 
         Args:
-            input  = [tuple] sequence of tensors of (raw) predictions
-            target = [tuple] sequence of tensors of hard targets
+            sales = [pd.DataFrame] table with sales per item for each day
 
         Returns [torch.Tensor]:
-            The grapheme_root, vowel_dacritic, consonant_diacritic,
-            and combined losses, given the predictions and hard targets.
+            Scale of each time series.
         """
-        losses = []
-        for y, t in zip(input, target):
-            t = t.to(self.device)
-            loss = F.cross_entropy(y, t)
-            losses.append(loss)
+        # select columns with unit sales and convert to torch.Tensor
+        sales = torch.tensor(sales.filter(like='d_').to_numpy())
 
-        losses.append(sum(losses))
-        return torch.stack(losses)
+        # aggregate unit sales for each level of the time series hierarchy
+        aggregates = self._aggregate(
+            sales, self._permutations, self._group_indices
+        )
 
-    
-class LabelSmoothingLoss(nn.Module):
-    """Sum of cross-entropy losses with soft targets.
+        # compute scale of each time series
+        squared_deltas = (aggregates[:, 1:] - aggregates[:, :-1])**2
+        scales = torch.sum(squared_deltas, dim=1) / (sales.shape[1] - 1.0)
 
-    When `smoothing=0.0`, the loss will be equivalent to 
-    standard cross-entropy loss (`F.cross_entropy()`).
+        return scales.to(self._device)
 
-    Attributes:
-        device     = [torch.device] device to compute the loss on
-        smoothing  = [float] controls degree of smoothing, in range [0, 1)
-        confidence = [float] max probability in smoothed labels, 1 - smoothing
-    """
-    def __init__(self, device, smoothing=0.0):
-        """Initializes label smoothing loss.
+    def _time_series_weights(self, calendar, prices, sales):
+        """Computes the weight of each time series.
 
         Args:
-            device    = [torch.device] device to compute the loss on
-            smoothing = [float] controls degree of smoothing, in range [0, 1)
+            calendar = [pd.DataFrame] table with data on each date
+            prices   = [pd.DataFrame] table with average sell prices each week
+            sales    = [pd.DataFrame] table with sales per item for each day
         """
-        super(LabelSmoothingLoss, self).__init__()
-        self.device = device
-        self.smoothing = smoothing  # alpha
-        self.confidence = 1 - smoothing
+        # select only necessary columns
+        calendar = calendar[['wm_yr_wk', 'd']]
+
+        # select only necessary columns and transform to long format data
+        sales = sales[WRMSSE._id_columns], sales.filter(like='d_').iloc[:, -28:]
+        sales = pd.concat(sales, axis=1)
+        sales = pd.wide_to_long(sales, 'd_', i=['store_id', 'item_id'], j='d')
+        sales = sales.reset_index()
+        sales['d'] = sales['d'].map(lambda x: f'd_{x}')
+
+        # create DataFrame with revenue data
+        data = calendar.merge(sales)
+        data = data.merge(prices)
+        data = data.sort_values(by=['store_id', 'item_id', 'd'])
+        data.index = range(data.shape[0])
+        data['revenue'] = data['d_'] * data['sell_price']
+
+        # determine group parameters from long format data
+        permutations, group_indices = self._indices(data)
+
+        # select column with revenues and convert to torch.Tensor
+        revenues = torch.tensor(data['revenue'].to_numpy(), dtype=torch.float)
+
+        # aggregate revenues for each level of the time series hierarchy
+        aggregates = self._aggregate(revenues, permutations, group_indices)
+
+        # compute weight of each time series
+        total = aggregates[0]
+        weights = aggregates / total
+
+        return weights.to(self._device)
+
+    @staticmethod
+    def _indices(df):
+        """Computes permutation and end indices of each group in input.
+
+        Args:
+            df = [pd.DataFrame] DataFrame with WRMSSE._id_columns columns
+
+        Returns:
+            permutations  = [[np.ndarray]*12] sales permutation for each group
+            group_indices = [[np.ndarray]*12] end indices for each group
+        """
+        # add total column for highest level of hierarchy
+        df['total'] = 'TOTAL'
+        permutations = []
+        group_indices = []
+
+        col1 = ['total'] + WRMSSE._id_columns
+        cols2 = [['']] + [[''] + WRMSSE._id_columns[-3:]]*2 + [['']]*3
+        for column1, col2 in zip(col1, cols2):
+            for column2 in col2:
+                level_columns = [column1] + ([column2] if column2 else [])
+                groups = df.groupby(level_columns)
+
+                permutation = groups.indices.values()
+                permutation = sorted(permutation, key=lambda x: x[0])
+
+                group_sizes = [len(group) for group in permutation]
+                group_end_indices = np.cumsum(group_sizes) - 1
+                group_indices.append(group_end_indices)
+
+                permutation = np.concatenate(permutation)
+                permutations.append(permutation)
+
+        return permutations, group_indices
+
+    @staticmethod
+    def _aggregate(sales, permutations, group_indices):
+        """Aggregates sales to compute all levels of the time series hierarchy.
+
+        Args:
+            sales         = [torch.Tensor] Tensor of unit or dollar sales
+            permutations  = [[np.ndarray]*12] sales permutation for each group
+            group_indices = [[np.ndarray]*12] end indices for each group
+
+        Returns [torch.Tensor]:
+            Tensor of aggregate sales given the permutations and group indices.
+        """
+        aggregates = []
+        for permutation, group_end_indices in zip(permutations, group_indices):
+            # permute input to get consecutive groups
+            permutation = sales[permutation]
+
+            # compute cumulative sum of sales along each group
+            sums1 = permutation.cumsum(0)[group_end_indices]
+            sums2 = torch.cat((torch.zeros_like(sales[:1]), sums1[:-1]))
+
+            # add aggregate sum of sales to list
+            aggregates.append(sums1 - sums2)
+
+        return torch.cat(aggregates)
 
     def forward(self, input, target):
-        """Sums cross-entropy losses, given predictions and soft targets.
+        """Computes the WRMSSE loss.
 
         Args:
-            input  = [tuple] sequence of tensors of (raw) predictions
-            target = [tuple] sequence of tensors of hard targets
-            
+            input  = [torch.Tensor] projected unit sales with shape (N, h)
+            target = [torch.Tensor] actual unit sales with shape (N, h)
+
         Returns [torch.Tensor]:
-            The grapheme_root, vowel_dacritic, consonant_diacritic, and
-            combined losses, given the predictions and soft targets.
+            Tensor with a single value for the loss.
         """
-        losses = []
-        for y, t in zip(input, target):
-            num_classes = y.size(-1)
-            t = t.unsqueeze(-1).to(self.device)
+        # aggregate the data to all levels of the time series hierarchy
+        projected_sales = self._aggregate(
+            input, self._permutations, self._group_indices
+        )
+        target = target.to(self._device)
+        actual_sales = self._aggregate(
+            target, self._permutations, self._group_indices
+        )
 
-            # compute smoothed labels
-            t_smooth = torch.full_like(y, self.smoothing / (num_classes - 1))
-            t_smooth = t_smooth.scatter(-1, t, self.confidence)
+        # compute WRMSSE loss
+        horizon = input.shape[1]
+        squared_errors = (actual_sales - projected_sales)**2
+        MSE = torch.sum(squared_errors, dim=1) / horizon
+        RMSSE = torch.sqrt(MSE / self._scales)
+        loss = torch.sum(self._weights * RMSSE)
 
-            # compute smoothed cross-entropy loss
-            y = y.log_softmax(dim=-1)
-            loss = (-t_smooth * y).sum(dim=-1).mean()
-            losses.append(loss)
-                
-        losses.append(sum(losses))
-        return torch.stack(losses)
-
-
-def _split_vectors(vectors, num_augments):
-    """Returns subsets of the latent vectors as tensors for each sub-problem.
-
-    Subsets the latent vectors according to the number of augmentations per
-    image for each sub-problem. It returns three tensors that contain a
-    subset of the latent vectors in vectors to increase training efficiency.
-
-    Args:
-        vectors      = [torch.Tensor] the latent vectors to be subsetted
-        num_augments = [torch.Tensor] number of augmentations per
-            sub-problem with shape (BATCH_SIZE, 3)
-
-    Returns [torch.Tensor]*3:
-        The latent vectors for the grapheme_root, vowel_diacritic,
-        and consonant_diacritic sub-problems.
-    """
-    if num_augments is None:
-        return vectors, vectors, vectors
-
-    # determine the ranges of the latent vectors for each sub-problem
-    max_augments, _ = num_augments.max(dim=-1, keepdim=True)
-    diffs = torch.cat((torch.tensor([[0]]), max_augments))
-    start_indices = torch.cumsum(diffs, dim=0)[:-1]
-    ranges = torch.cat((start_indices, start_indices + num_augments), dim=-1)
-
-    # determine the indices of the latent vectors for each sub-problem
-    graph = torch.cat([torch.arange(st, end) for st, end in ranges[:, [0, 1]]])
-    vowel = torch.cat([torch.arange(st, end) for st, end in ranges[:, [0, 2]]])
-    conso = torch.cat([torch.arange(st, end) for st, end in ranges[:, [0, 3]]])
-
-    return vectors[graph], vectors[vowel], vectors[conso]
+        return loss
 
 
-class ZeroNet(nn.Module):
-    """Simple convolutional neural network.
+if __name__ == '__main__':
+    from datetime import datetime
 
-    Attributes:
-        conv1      = [nn.Module] first convolutional layer
-        conv2      = [nn.Module] second convolutional layer
-        conv2_drop = [nn.Module] 2D dropout layer
-        fc1        = [nn.Module] first fully-connected layer
-        fc2        = [nn.Module] second fully-connected layer
-        fc3        = [nn.Module] third fully-connected layer
-        fc4        = [nn.Module] fourth fully-connected layer
-        device     = [torch.device] device to compute the predictions on
-    """
+    path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning in'
+            ' Practice\\Competition 2\\project\\')
+    calendar = pd.read_csv(path + 'calendar.csv')
+    prices = pd.read_csv(path + 'sell_prices.csv')
+    sales = pd.read_csv(path + 'sales_train_validation.csv')
 
-    def __init__(self, device, kernel_size=3):
-        """Initialize the simple convolutional neural network.
+    device = torch.device('cuda')
+    time = datetime.now()
+    criterion = WRMSSE(device, calendar, prices, sales)
+    print('Time to initialize loss: ', datetime.now() - time)
 
-        Args:
-            device      = [torch.device] device to compute the predictions on
-            kernel_size = [int] kernel size for the two convolutional layers
-        """
-        super(ZeroNet, self).__init__()
+    horizon = 5
+    input = torch.rand(30490, horizon, device=device)
+    target = torch.rand(30490, horizon)
 
-        # input channels 1, output channels 10
-        self.conv1 = nn.Conv2d(1, 10, kernel_size=kernel_size)
-
-        # input channels 10, output channels 20
-        self.conv2 = nn.Conv2d(10, 20, kernel_size=kernel_size)
-        self.conv2_drop = nn.Dropout2d()
-
-        # extra fully-connected layers to determine labels
-        self.fc1 = nn.Linear(720, 256)
-        self.fc2 = nn.Linear(256, 168)
-        self.fc3 = nn.Linear(256, 11)
-        self.fc4 = nn.Linear(256, 7)
-
-        # put model on GPU
-        self.device = device
-        self.to(self.device)
-
-    def forward(self, x, num_augments=None):
-        """Forward pass of the CNN.
-
-        Args:
-            x            = [torch.Tensor] images with shape (N, 1, SIZE, SIZE)
-            num_augments = [torch.Tensor] number of augmentations per
-                sub-problem with shape (BATCH_SIZE, 3)
-
-        Returns [torch.Tensor]*3:
-            Non-normalized predictions for each class for each sub-problem.
-        """
-        # put images on GPU
-        x = x.to(self.device)
-
-        # get smaller and denser representations
-        h = F.relu(F.max_pool2d(self.conv1(x), 3))
-        h = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(h)), 3))
-        h = h.flatten(start_dim=1)
-        h = F.relu(self.fc1(h))
-
-        # determine predictions for each sub-problem
-        h_graph, h_vowel, h_conso = _split_vectors(h, num_augments)
-        y_graph = self.fc2(h_graph)
-        y_vowel = self.fc3(h_vowel)
-        y_conso = self.fc4(h_conso)
-        return y_graph, y_vowel, y_conso
-
-
-class BengaliNet(nn.Module):
-    """Model that uses pre-trained ResNet-18 for intermediate layers.
-
-    Attributes:
-        conv1    = [nn.Module] first convolutional layer
-        resnet18 = [nn.Module] non-pretrained layers of ResNet-18 architecture
-        fc1      = [nn.Module] first fully-connected layer
-        fc2      = [nn.Module] second fully-connected layer
-        fc3      = [nn.Module] third fully-connected layer
-        device   = [torch.device] device to compute the predictions on
-    """
-
-    def __init__(self, device):
-        super(BengaliNet, self).__init__()
-
-        # convolutional layer to get required number of channels
-        self.conv1 = nn.Conv2d(1, 64, 5, padding=2, bias=False)
-
-        # create large non-pretrained ResNet model to generate image embeddings
-        self.resnet18 = models.resnet18(pretrained=False)
-        self.resnet18 = nn.Sequential(*list(self.resnet18.children())[1:-1])
-
-        # extra fully-connected layers to determine labels
-        self.fc1 = nn.Linear(512, 168)
-        self.fc2 = nn.Linear(512, 11)
-        self.fc3 = nn.Linear(512, 7)
-
-        # put model on GPU
-        self.device = device
-        self.to(self.device)
-
-    def forward(self, x, num_augments=None):
-        """Foward pass of the CNN.
-
-        Args:
-            x            = [torch.Tensor] images with shape (N, 1, SIZE, SIZE)
-            num_augments = [torch.Tensor] number of augmentations per
-                sub-problem with shape (BATCH_SIZE, 3)
-
-        Returns [torch.Tensor]*3:
-            Non-normalized predictions for each class for each sub-problem.
-        """
-        # put images on GPU
-        x = x.to(self.device)
-
-        # get correct number of channels for ResNet-18
-        h = self.conv1(x)
-
-        # get image embeddings from ResNet-18
-        h = self.resnet18(h)
-        h = h.flatten(start_dim=1)
-
-        # determine predictions for each sub-problem
-        h_graph, h_vowel, h_conso = _split_vectors(h, num_augments)
-        y_graph = self.fc1(h_graph)
-        y_vowel = self.fc2(h_vowel)
-        y_conso = self.fc3(h_conso)
-        return y_graph, y_vowel, y_conso
+    time = datetime.now()
+    loss = criterion(input, target)
+    print('Time to compute loss: ', datetime.now() - time)
