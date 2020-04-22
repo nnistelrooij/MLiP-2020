@@ -172,8 +172,9 @@ class WRMSSE(nn.Module):
         )
 
         # compute WRMSSE loss
+        horizon = input.shape[1]
         squared_errors = (actual_sales - projected_sales)**2
-        MSE = torch.sum(squared_errors, dim=1) / input.shape[1]
+        MSE = torch.sum(squared_errors, dim=1) / horizon
         RMSSE = torch.sqrt(MSE / self._scales)
         loss = torch.sum(self._weights * RMSSE)
 
@@ -189,13 +190,14 @@ if __name__ == '__main__':
     prices = pd.read_csv(path + 'sell_prices.csv')
     sales = pd.read_csv(path + 'sales_train_validation.csv')
 
-    device = torch.device('cpu')
+    device = torch.device('cuda')
     time = datetime.now()
     criterion = WRMSSE(device, calendar, prices, sales)
     print('Time to initialize loss: ', datetime.now() - time)
 
-    input = torch.rand(30490, 5, device=device)
-    target = torch.rand(30490, 5)
+    horizon = 5
+    input = torch.rand(30490, horizon, device=device)
+    target = torch.rand(30490, horizon)
 
     time = datetime.now()
     loss = criterion(input, target)
