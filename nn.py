@@ -111,7 +111,7 @@ class WRMSSE(nn.Module):
         cols2 = [['']] + [[''] + WRMSSE._id_columns[-3:]]*2 + [['']]*3
         for column1, col2 in zip(col1, cols2):
             for column2 in col2:
-                level_columns = [column1] + ([column2] if column2 else [])
+                level_columns = (column1 + ' ' + column2).split()
                 groups = df.groupby(level_columns)
 
                 permutation = groups.indices.values()
@@ -184,8 +184,8 @@ class WRMSSE(nn.Module):
 if __name__ == '__main__':
     from datetime import datetime
 
-    path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning in'
-            ' Practice\\Competition 2\\project\\')
+    path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning '
+            'in Practice\\Competition 2\\project\\')
     calendar = pd.read_csv(path + 'calendar.csv')
     prices = pd.read_csv(path + 'sell_prices.csv')
     sales = pd.read_csv(path + 'sales_train_validation.csv')
