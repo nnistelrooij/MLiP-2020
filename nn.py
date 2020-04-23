@@ -111,7 +111,7 @@ class WRMSSE(nn.Module):
         cols2 = [['']] + [[''] + WRMSSE._id_columns[-3:]]*2 + [['']]*3
         for column1, col2 in zip(col1, cols2):
             for column2 in col2:
-                level_columns = [column1] + ([column2] if column2 else [])
+                level_columns = f'{column1} {column2}'.split()
                 groups = df.groupby(level_columns)
 
                 permutation = groups.indices.values()
