@@ -6,7 +6,6 @@ import torch.nn as nn
 
 class WRMSSE(nn.Module):
     """Weighted Root Mean Squared Scaled Error used for loss module."""
-    _id_columns = ['state_id', 'store_id', 'cat_id', 'dept_id', 'item_id']
 
     def __init__(self, device, calendar, prices, sales):
         """Initializes WRMSSE loss module.
@@ -63,7 +62,7 @@ class WRMSSE(nn.Module):
         calendar = calendar[['wm_yr_wk', 'd']]
 
         # select only necessary columns and transform to long format data
-        sales = sales[WRMSSE._id_columns], sales.filter(like='d_').iloc[:, -28:]
+        sales = sales.filter(like='_id'), sales.filter(like='d_').iloc[:, -28:]
         sales = pd.concat(sales, axis=1)
         sales = pd.wide_to_long(sales, 'd_', i=['store_id', 'item_id'], j='d')
         sales = sales.reset_index()
@@ -71,7 +70,7 @@ class WRMSSE(nn.Module):
 
         # create DataFrame with revenue data
         data = calendar.merge(sales)
-        data = data.merge(prices)
+        data = prices.merge(data)
         data = data.sort_values(by=['store_id', 'item_id', 'd'])
         data.index = range(data.shape[0])
         data['revenue'] = data['d_'] * data['sell_price']
@@ -107,8 +106,8 @@ class WRMSSE(nn.Module):
         permutations = []
         group_indices = []
 
-        col1 = ['total'] + WRMSSE._id_columns
-        cols2 = [['']] + [[''] + WRMSSE._id_columns[-3:]]*2 + [['']]*3
+        col1 = ['total', 'state_id', 'store_id', 'cat_id', 'dept_id', 'item_id']
+        cols2 = [['']] + [['', 'cat_id', 'dept_id', 'item_id']]*2 + [['']]*3
         for column1, col2 in zip(col1, cols2):
             for column2 in col2:
                 level_columns = f'{column1} {column2}'.split()
