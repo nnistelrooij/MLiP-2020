@@ -28,6 +28,7 @@ class ForecastDataset(Dataset):
         """
         super(Dataset, self).__init__()
 
+        # sort sales table for consistency
         sales = sales.sort_values(by=['store_id', 'item_id'])
         sales.index = range(sales.shape[0])
 
@@ -80,44 +81,58 @@ class ForecastDataset(Dataset):
     @staticmethod
     def _snap(calendar, sales):
         """Whether SNAP purchases are allowed of shape (days, N)."""
+        # determine number of groups per state
         groups = sales.groupby('state_id').groups.values()
         repetitions = [len(group) for group in groups]
 
+        # compute SNAP data for each state
         snap_CA = pd.concat([calendar['snap_CA']]*repetitions[0], axis=1)
         snap_TX = pd.concat([calendar['snap_TX']]*repetitions[1], axis=1)
         snap_WI = pd.concat([calendar['snap_WI']]*repetitions[2], axis=1)
 
+        # concatenate SNAP data for all states
         snap = pd.concat((snap_CA, snap_TX, snap_WI), axis=1)
         return snap.to_numpy()
 
     @staticmethod
     def _sell_prices(calendar, prices, sales):
         """Sell prices for each store-item of shape (days, N)."""
+        # determine index sizes of tables
         num_days = calendar.shape[0]
         num_groups = sales.shape[0]
 
+        # repeat calendar table to get (num_days*num_groups, 2) shape
         calendar = calendar[['wm_yr_wk', 'd']]
         calendar = calendar.iloc[np.repeat(np.arange(num_days), num_groups)]
         calendar.index = range(num_days*num_groups)
 
+        # concatenate sales table to get (num_days*num_groups, 2) shape
         sales = sales[['store_id', 'item_id']]
         sales = pd.concat([sales]*num_days)
         sales.index = range(num_days*num_groups)
 
+        # join with prices table to get prices for each day and each group
         data = pd.concat((calendar, sales), axis=1)
         data = data.merge(prices, how='left')
         data = data.drop(columns='wm_yr_wk')
         data = data.fillna(0)
+
+        # pivot table back to wide format to get (num_groups, num_days) shape
         data = data.set_index(['store_id', 'item_id'])
         data = data.pivot(columns='d')
         data.columns = data.columns.droplevel()
+
+        # sort columns from first to last day
         data.columns = data.columns.map(lambda x: int(x[2:]))
         data = data.reindex(sorted(data.columns), axis=1)
+
+        # sort rows by store and item ids
         data = data.reset_index()
         data = data.sort_values(by=['store_id', 'item_id'])
         data.index = range(num_groups)
 
-        return data.loc[:, 1:].T.to_numpy()
+        # return prices in (num_days, num_groups) shape
+        return data.iloc[:, 2:].T.to_numpy()
 
     @staticmethod
     def _unit_sales(sales):
