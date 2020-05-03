@@ -8,7 +8,7 @@ class ReduceLROnPlateau(object):
     """Reduce learning rate when loss has stopped improving.
 
     Attributes:
-        writer         = [MetricWriter] TensorBoard writer of learning rate
+        writer         = [TensorBoardWriter] TensorBoard writer of learning rate
         optimizer      = [Optimizer] optimizer containing the learning rate
         factor         = [float] factor by which the learning rate is reduced
         patience       = [int] number of epochs with no improvement after
@@ -21,7 +21,7 @@ class ReduceLROnPlateau(object):
         """Initialize the learning rate scheduler.
 
         Args:
-            writer    = [MetricWriter] TensorBoard writer of learning rate
+            writer    = [TensorBoardWriter] TensorBoard writer of learning rate
             optimizer = [Optimizer] optimizer containing the learning rate
             factor    = [float] factor by which the learning rate is reduced
             patience  = [int] number of epochs with no improvement after
@@ -58,19 +58,19 @@ class ReduceLROnPlateau(object):
 
 
 def train(model, train_loader, train_writer, optimizer, criterion, epoch):
-    """Update model weights given losses on train data.
+    """Update model parameters given losses on train data.
 
     Args:
         model        = [nn.Module] model to train with train data set
         train_loader = [DataLoader] train data loader
-        train_writer = [MetricWriter] TensorBoard writer of train loss
+        train_writer = [TensorBoardWriter] TensorBoard writer of train loss
         optimizer    = [Optimizer] optimizer to update the model
         criterion    = [nn.Module] neural network module to compute loss
         epoch        = [int] current iteration over the training data set
     """
-    for x, t in tqdm(train_loader, desc=f'Train Epoch {epoch}'):
+    for day, items, t in tqdm(train_loader, desc=f'Train Epoch {epoch}'):
         # predict
-        y = model(x)
+        y = model(day, items)
 
         # loss
         loss = criterion(y, t)
@@ -80,7 +80,7 @@ def train(model, train_loader, train_writer, optimizer, criterion, epoch):
         loss.backward()
         optimizer.step()
 
-        # show loss every 100 days in TensorBoard
+        # show loss every 100 days on TensorBoard
         train_writer.show_loss(loss)
 
 
@@ -90,7 +90,7 @@ def validate(model, val_loader, val_writer, criterion, epoch):
     Args:
         model      = [nn.Module] model to test with validation data set
         val_loader = [DataLoader] validation data loader
-        val_writer = [MetricWriter] TensorBoard writer of validation loss
+        val_writer = [TensorBoardWriter] TensorBoard writer of validation loss
         criterion  = [nn.Module] neural network module to compute loss
         epoch      = [int] current iteration over the training data set
 
@@ -102,17 +102,17 @@ def validate(model, val_loader, val_writer, criterion, epoch):
 
     # start iterator with actual sales from previous day
     val_loader = iter(val_loader)
-    x, t = next(val_loader)
-
-    # initialize sales and targets for current day
-    sales = [model(x)]
-    targets = [t]
+    day, items, t = next(val_loader)
 
     with torch.no_grad():
-        for x, t in tqdm(val_loader, desc=f'Validation Epoch {epoch}'):
+        # initialize sales and targets for current day
+        sales = [model(day, items)[0]]
+        targets = [t]
+
+        for day, items, t in tqdm(val_loader, desc=f'Validation Epoch {epoch}'):
             # predict with sales projections from previous day
-            y = model(x, sales[-1])
-            sales.append(y)
+            y = model(day, items, sales)
+            sales.append(y[0])
 
             # add target to targets list
             targets.append(t)

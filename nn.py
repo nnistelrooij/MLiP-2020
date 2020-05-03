@@ -5,7 +5,15 @@ import torch.nn as nn
 
 
 class WRMSSE(nn.Module):
-    """Weighted Root Mean Squared Scaled Error used for loss module."""
+    """Weighted Root Mean Squared Scaled Error used for loss module.
+
+    Attributes:
+        device        = [torch.device] device to compute loss on
+        permutations  = [[np.ndarray]*12] sales permutation for each group
+        group_indices = [[np.ndarray]*12] end indices for each group
+        scales        = [torch.Tensor] pre-computed scales used in the WRMSSE
+        weights       = [torch.Tensor] pre-computed weights used in the WRMSSE
+    """
 
     def __init__(self, device, calendar, prices, sales):
         """Initializes WRMSSE loss module.
@@ -18,14 +26,14 @@ class WRMSSE(nn.Module):
         """
         super(WRMSSE, self).__init__()
 
-        self._device = device
+        self.device = device
 
         sales = sales.sort_values(by=['store_id', 'item_id'])
         sales.index = range(sales.shape[0])
-        self._permutations, self._group_indices = self._indices(sales)
+        self.permutations, self.group_indices = self._indices(sales)
 
-        self._scales = self._time_series_scales(sales)
-        self._weights = self._time_series_weights(calendar, prices, sales)
+        self.scales = self._time_series_scales(sales)
+        self.weights = self._time_series_weights(calendar, prices, sales)
 
     def _time_series_scales(self, sales):
         """Computes the scale of each time series.
@@ -41,14 +49,14 @@ class WRMSSE(nn.Module):
 
         # aggregate unit sales for each level of the time series hierarchy
         aggregates = self._aggregate(
-            sales, self._permutations, self._group_indices
+            sales, self.permutations, self.group_indices
         )
 
         # compute scale of each time series
         squared_deltas = (aggregates[:, 1:] - aggregates[:, :-1])**2
-        scales = torch.sum(squared_deltas, dim=1) / (sales.shape[1] - 1.0)
+        scales = torch.sum(squared_deltas, dim=1) / (sales.shape[1] - 1)
 
-        return scales.to(self._device)
+        return scales.to(self.device, dtype=torch.float32)
 
     def _time_series_weights(self, calendar, prices, sales):
         """Computes the weight of each time series.
@@ -79,7 +87,7 @@ class WRMSSE(nn.Module):
         permutations, group_indices = self._indices(data)
 
         # select column with revenues and convert to torch.Tensor
-        revenues = torch.tensor(data['revenue'].to_numpy(), dtype=torch.float)
+        revenues = torch.tensor(data['revenue'].to_numpy())
 
         # aggregate revenues for each level of the time series hierarchy
         aggregates = self._aggregate(revenues, permutations, group_indices)
@@ -88,7 +96,7 @@ class WRMSSE(nn.Module):
         total = aggregates[0]
         weights = aggregates / total
 
-        return weights.to(self._device)
+        return weights.to(self.device, dtype=torch.float32)
 
     @staticmethod
     def _indices(df):
@@ -144,7 +152,7 @@ class WRMSSE(nn.Module):
 
             # compute cumulative sum of sales along each group
             sums1 = permutation.cumsum(0)[group_end_indices]
-            sums2 = torch.cat((torch.zeros_like(sales[:1]), sums1[:-1]))
+            sums2 = torch.cat((torch.zeros_like(sums1[:1]), sums1[:-1]))
 
             # add aggregate sum of sales to list
             aggregates.append(sums1 - sums2)
@@ -161,21 +169,26 @@ class WRMSSE(nn.Module):
         Returns [torch.Tensor]:
             Tensor with a single value for the loss.
         """
-        # aggregate the data to all levels of the time series hierarchy
+        # determine horizon to compute loss over
+        horizon = target.shape[2]
+
+        # select correct columns and aggregate to all levels of the hierarchy
+        input = input[:, :horizon]
         projected_sales = self._aggregate(
             input, self._permutations, self._group_indices
         )
-        target = target.to(self._device)
+
+        # remove batch dim, put on GPU, and aggregate to all levels of hierarchy
+        target = target.squeeze(0).to(self.device)
         actual_sales = self._aggregate(
             target, self._permutations, self._group_indices
         )
 
         # compute WRMSSE loss
-        horizon = input.shape[1]
         squared_errors = (actual_sales - projected_sales)**2
         MSE = torch.sum(squared_errors, dim=1) / horizon
-        RMSSE = torch.sqrt(MSE / self._scales)
-        loss = torch.sum(self._weights * RMSSE)
+        RMSSE = torch.sqrt(MSE / self.scales)
+        loss = torch.sum(self.weights * RMSSE)
 
         return loss
 
@@ -196,7 +209,7 @@ if __name__ == '__main__':
 
     horizon = 5
     input = torch.rand(30490, horizon, device=device)
-    target = torch.rand(30490, horizon)
+    target = torch.rand(1, 30490, 3)
 
     time = datetime.now()
     loss = criterion(input, target)
