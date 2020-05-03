@@ -7,17 +7,12 @@ class ForecastDataset(Dataset):
     """Dataset to load forecasts.
 
     Attributes:
-        weekdays  = [np.ndarray] one-hot vectors of weekdays
-        weeks     = [np.ndarray] integers of weeks in range [1, 53]
-        monthdays = [np.ndarray] integers of monthdays in range [1, 31]
-        months    = [np.ndarray] one-hot vectors of months
-        years     = [np.ndarray] one-hot vectors of years
-        events    = [np.ndarray] one-hot vectors of event types
+        day       = [np.ndarray] data constant per store-item
         snap      = [np.ndarray] whether or not SNAP purchases are allowed
         prices    = [np.ndarray] sell prices of each item at all stores
-        sales     = [np.ndarray] unit sales of each item at all store
+        sales     = [np.ndarray] unit sales of each item at all stores
         seq_len   = [int] sequence length of model input
-        horizon   = [int] sequence length of model output
+        horizon   = [int] sequence length of model output, 0 for inference
     """
 
     def __init__(self, calendar, prices, sales, seq_len=1, horizon=1):
@@ -32,18 +27,24 @@ class ForecastDataset(Dataset):
         """
         super(Dataset, self).__init__()
 
+        # get data constant per store-item in one array
+        self.day = np.concatenate((
+            self._weekdays(calendar),
+            self._weeks(calendar),
+            self._monthdays(calendar),
+            self._months(calendar),
+            self._years(calendar),
+            self._event_types(calendar)),
+            axis=1
+        ).astype(np.float32)
+
         # sort sales table for consistency
         sales = sales.sort_values(by=['store_id', 'item_id'])
         sales.index = range(sales.shape[0])
 
-        self.weekdays = self._weekdays(calendar)
-        self.weeks = self._weeks(calendar)
-        self.monthdays = self._monthdays(calendar)
-        self.months = self._months(calendar)
-        self.years = self._years(calendar)
-        self.events = self._event_types(calendar)
+        # get data different per store-item
         self.snap = self._snap(calendar, sales)
-        self.prices = self._sell_prices(calendar, prices, sales)
+        self.prices = self._sell_prices(calendar, prices)
         self.sales = self._unit_sales(sales)
 
         self.seq_len = seq_len
@@ -52,101 +53,82 @@ class ForecastDataset(Dataset):
     @staticmethod
     def _weekdays(calendar):
         """One-hot representation of weekdays of shape (days, 7)."""
-        return np.arange(1, 8) == calendar[['wday']].to_numpy()
+        return pd.RangeIndex(1, 8) == calendar[['wday']]
 
     @staticmethod
     def _weeks(calendar):
         """Integers of week numbers of shape (days, 1)."""
-        return calendar[['wm_yr_wk']].apply(lambda x: x % 100).to_numpy()
+        return calendar[['wm_yr_wk']].apply(lambda x: x % 100)
 
     @staticmethod
     def _monthdays(calendar):
         """Integers of month days of shape (days, 1)."""
-        return calendar[['date']].applymap(lambda x: int(x[-2:])).to_numpy()
+        return calendar[['date']].applymap(lambda x: x[-2:])
 
     @staticmethod
     def _months(calendar):
         """One-hot representation of months of shape (days, 12)."""
-        return np.arange(1, 13) == calendar[['month']].to_numpy()
+        return pd.RangeIndex(1, 13) == calendar[['month']]
 
     @staticmethod
     def _years(calendar):
         """One-hot representation of years of shape (days, 6)."""
-        return np.arange(2011, 2017) == calendar[['year']].to_numpy()
+        return pd.RangeIndex(2011, 2017) == calendar[['year']]
 
     @staticmethod
     def _event_types(calendar):
         """One-hot representation of event types of shape (days, 5)."""
-        events1 = calendar[['event_type_1']].fillna('N/A').to_numpy()
-        event_types = np.unique(events1)
-
-        events1 = event_types == events1
+        # make one-hot vectors for each column in calendar table
+        event_types = calendar['event_type_1'].unique()
+        events1 = event_types == calendar[['event_type_1']].to_numpy()
         events2 = event_types == calendar[['event_type_2']].to_numpy()
 
-        return events1 + events2
+        # sum one-hot vectors and add no-event column
+        events = events1 | events2
+        events[:, 0] = ~np.any(events, axis=1)
+
+        return events
 
     @staticmethod
     def _snap(calendar, sales):
         """Whether SNAP purchases are allowed of shape (days, N)."""
         # determine number of groups per state
-        groups = sales.groupby('state_id').groups.values()
-        repetitions = [len(group) for group in groups]
+        repetitions = sales.groupby('state_id').size()
 
         # compute SNAP data for each state
-        snap_CA = pd.concat([calendar['snap_CA']]*repetitions[0], axis=1)
-        snap_TX = pd.concat([calendar['snap_TX']]*repetitions[1], axis=1)
-        snap_WI = pd.concat([calendar['snap_WI']]*repetitions[2], axis=1)
+        snap_CA = pd.concat([calendar['snap_CA']]*repetitions['CA'], axis=1)
+        snap_TX = pd.concat([calendar['snap_TX']]*repetitions['TX'], axis=1)
+        snap_WI = pd.concat([calendar['snap_WI']]*repetitions['WI'], axis=1)
 
         # concatenate SNAP data for all states
         snap = pd.concat((snap_CA, snap_TX, snap_WI), axis=1)
-        return snap.to_numpy()
+        return snap.to_numpy(dtype=np.float32)
 
     @staticmethod
-    def _sell_prices(calendar, prices, sales):
+    def _sell_prices(calendar, prices):
         """Sell prices for each store-item of shape (days, N)."""
-        # determine index sizes of tables
-        num_days = calendar.shape[0]
-        num_groups = sales.shape[0]
+        # sort prices on store-items
+        prices = prices.sort_values(by=['store_id', 'item_id'])
 
-        # repeat calendar table to get (num_days*num_groups, 2) shape
-        calendar = calendar[['wm_yr_wk', 'd']]
-        calendar = calendar.iloc[np.repeat(np.arange(num_days), num_groups)]
-        calendar.index = range(num_days*num_groups)
+        # pivot prices table to wide format
+        prices = prices.set_index(['store_id', 'item_id'])
+        prices = prices.pivot(columns='wm_yr_wk')
+        prices.columns = prices.columns.droplevel()
 
-        # concatenate sales table to get (num_days*num_groups, 2) shape
-        sales = sales[['store_id', 'item_id']]
-        sales = pd.concat([sales]*num_days)
-        sales.index = range(num_days*num_groups)
-
-        # join with prices table to get prices for each day and each group
-        data = pd.concat((calendar, sales), axis=1)
-        data = data.merge(prices, how='left')
-        data = data.drop(columns='wm_yr_wk')
-        data = data.fillna(0)
-
-        # pivot table back to wide format to get (num_groups, num_days) shape
-        data = data.set_index(['store_id', 'item_id'])
-        data = data.pivot(columns='d')
-        data.columns = data.columns.droplevel()
-
-        # sort columns from first to last day
-        data.columns = data.columns.map(lambda x: int(x[2:]))
-        data = data.reindex(sorted(data.columns), axis=1)
-
-        # sort rows by store and item ids
-        data = data.reset_index()
-        data = data.sort_values(by=['store_id', 'item_id'])
-        data.index = range(num_groups)
+        # fill missing data with zeros and repeat prices for all days
+        prices = prices.fillna(0)
+        prices = prices[calendar['wm_yr_wk']]
 
         # return prices in (num_days, num_groups) shape
-        return data.iloc[:, 2:].T.to_numpy()
+        return prices.T.to_numpy(dtype=np.float32)
 
     @staticmethod
     def _unit_sales(sales):
         """Unit sales for each store-item of shape (days, N)."""
-        return sales.filter(like='d_').T.to_numpy()
+        return sales.filter(like='d_').T.to_numpy(dtype=np.float32)
 
     def __len__(self):
+        """Returns number of items in the dataset."""
         if self.horizon:
             return len(self.sales) - self.seq_len
         else:
@@ -195,16 +177,8 @@ class ForecastDataset(Dataset):
         # determine index at end of sequence
         end_idx = idx + self.seq_len
 
-        # concatenate data constant per store-item
-        day = np.concatenate((
-            self.weekdays[idx + 1:end_idx + 1],
-            self.weeks[idx + 1:end_idx + 1],
-            self.monthdays[idx + 1:end_idx + 1],
-            self.months[idx + 1:end_idx + 1],
-            self.years[idx + 1:end_idx + 1],
-            self.events[idx + 1:end_idx + 1]),
-            axis=1
-        ).astype(np.float32)
+        # get data constant per store-item
+        day = self.day[idx + 1:end_idx + 1]
 
         if self.horizon:  # training or validation mode
             # stack all data different per store-item
@@ -213,24 +187,24 @@ class ForecastDataset(Dataset):
                 self.prices[idx + 1:end_idx + 1],
                 self.sales[idx:end_idx]),
                 axis=2
-            ).astype(np.float32)
+            )
 
             # get targets in shape (N, |targets|)
             targets = self.sales[end_idx:end_idx + self.horizon].T
 
-            return day, items, targets.astype(np.float32)
+            return day, items, targets
         else:  # inference mode
             # stack only SNAP and prices data; sales has variable length
             items = np.stack((
                 self.snap[idx + 1:end_idx + 1],
                 self.prices[idx + 1:end_idx + 1]),
                 axis=2
-            ).astype(np.float32)
+            )
 
             # return sales separately, because it has a variable length
             sales = self.sales[idx:end_idx]
 
-            return day, items, sales.astype(np.float32)
+            return day, items, sales
 
 
 if __name__ == '__main__':
@@ -241,9 +215,6 @@ if __name__ == '__main__':
     calendar = pd.read_csv(path + 'calendar.csv')
     prices = pd.read_csv(path + 'sell_prices.csv')
     sales = pd.read_csv(path + 'sales_train_validation.csv')
-    rng = np.random.default_rng()
-    rand_idx = rng.choice(np.arange(sales.shape[0]), size=3049, replace=False)
-    sales = sales.iloc[rand_idx]
 
     time = datetime.now()
     dataset = ForecastDataset(calendar, prices, sales, seq_len=8, horizon=5)
