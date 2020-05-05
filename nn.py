@@ -162,17 +162,22 @@ class WRMSSE(nn.Module):
         Returns [torch.Tensor]:
             Tensor with a single value for the loss.
         """
-        # aggregate the data to all levels of the time series hierarchy
+        # determine horizon to compute loss over
+        horizon = target.shape[2]
+
+        # select correct columns and aggregate to all levels of the hierarchy
+        input = input[:, :horizon]
         projected_sales = self._aggregate(
             input, self._permutations, self._group_indices
         )
-        target = target.to(self._device)
+
+        # remove batch dim, put on GPU, and aggregate to all levels of hierarchy
+        target = target.squeeze(0).to(self._device)
         actual_sales = self._aggregate(
             target, self._permutations, self._group_indices
         )
 
         # compute WRMSSE loss
-        horizon = input.shape[1]
         squared_errors = (actual_sales - projected_sales)**2
         MSE = torch.sum(squared_errors, dim=1) / horizon
         RMSSE = torch.sqrt(MSE / self._scales)
@@ -197,7 +202,7 @@ if __name__ == '__main__':
 
     horizon = 5
     input = torch.rand(30490, horizon, device=device)
-    target = torch.rand(30490, horizon)
+    target = torch.rand(1, 30490, 3)
 
     time = datetime.now()
     loss = criterion(input, target)
