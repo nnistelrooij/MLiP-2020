@@ -45,7 +45,7 @@ class WRMSSE(nn.Module):
             Scale of each time series.
         """
         # select columns with unit sales and convert to torch.Tensor
-        sales = torch.tensor(sales.filter(like='d_').to_numpy())
+        sales = torch.tensor(sales.filter(like='d_').to_numpy()).float()
 
         # aggregate unit sales for each level of the time series hierarchy
         aggregates = self._aggregate(
@@ -56,7 +56,7 @@ class WRMSSE(nn.Module):
         squared_deltas = (aggregates[:, 1:] - aggregates[:, :-1])**2
         scales = torch.sum(squared_deltas, dim=1) / (sales.shape[1] - 1)
 
-        return scales.to(self.device, dtype=torch.float32)
+        return scales.to(self.device)
 
     def _time_series_weights(self, calendar, prices, sales):
         """Computes the weight of each time series.
@@ -87,7 +87,7 @@ class WRMSSE(nn.Module):
         permutations, group_indices = self._indices(data)
 
         # select column with revenues and convert to torch.Tensor
-        revenues = torch.tensor(data['revenue'].to_numpy())
+        revenues = torch.tensor(data['revenue'].to_numpy()).float()
 
         # aggregate revenues for each level of the time series hierarchy
         aggregates = self._aggregate(revenues, permutations, group_indices)
@@ -96,7 +96,7 @@ class WRMSSE(nn.Module):
         total = aggregates[0]
         weights = aggregates / total
 
-        return weights.to(self.device, dtype=torch.float32)
+        return weights.to(self.device)
 
     @staticmethod
     def _indices(df):
