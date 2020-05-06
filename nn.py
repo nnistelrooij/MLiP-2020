@@ -175,13 +175,13 @@ class WRMSSE(nn.Module):
         # select correct columns and aggregate to all levels of the hierarchy
         input = input[:, :horizon]
         projected_sales = self._aggregate(
-            input, self._permutations, self._group_indices
+            input, self.permutations, self.group_indices
         )
 
         # remove batch dim, put on GPU, and aggregate to all levels of hierarchy
         target = target.squeeze(0).to(self.device)
         actual_sales = self._aggregate(
-            target, self._permutations, self._group_indices
+            target, self.permutations, self.group_indices
         )
 
         # compute WRMSSE loss
@@ -196,13 +196,15 @@ class WRMSSE(nn.Module):
 if __name__ == '__main__':
     from datetime import datetime
 
-    path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning in'
-            ' Practice\\Competition 2\\project\\')
+    # path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning in'
+    #         ' Practice\\Competition 2\\project\\')
+    path = "/Users/mauriceverbrugge/github/MLiP-2020/kaggle/input/m5-forecasting-accuracy/"
     calendar = pd.read_csv(path + 'calendar.csv')
     prices = pd.read_csv(path + 'sell_prices.csv')
     sales = pd.read_csv(path + 'sales_train_validation.csv')
 
-    device = torch.device('cuda')
+    # device = torch.device('cuda')
+    device = torch.device('cpu')
     time = datetime.now()
     criterion = WRMSSE(device, calendar, prices, sales)
     print('Time to initialize loss: ', datetime.now() - time)
