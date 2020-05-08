@@ -4,26 +4,27 @@ import torch
 import torch.nn as nn
 
 
-class SplitLSTM(nn.LSTM):
+class SplitLSTM(nn.Module):
     """Module for LSTM with independent sub-layers."""
 
     def __init__(self, num_const, num_var, num_hidden, num_groups, independent):
-        super(SplitLSTM, self).__init__(
-            input_size=num_const + num_var * num_groups,
-            hidden_size=num_hidden * num_groups,
-            batch_first=True
-        )
+        super(SplitLSTM, self).__init__()
+        self.input_size = num_const + num_var * num_groups
+        self.hidden_size = num_hidden * num_groups
+        self.lstm = nn.LSTM(input_size=self.input_size,
+                            hidden_size=self.hidden_size,
+                            batch_first=True)
 
         if independent:
             indices = self._weight_indices(num_const, num_var, num_hidden)
             self.row_indices, self.ih_col_indices, self.hh_col_indices = indices
 
             with torch.no_grad():
-                self.weight_ih_l0[self.row_indices, self.ih_col_indices] = 0
-                self.weight_ih_l0.register_hook(self._ih_split_hook)
+                self.lstm.weight_ih_l0[self.row_indices, self.ih_col_indices] = 0
+                self.lstm.weight_ih_l0.register_hook(self._ih_split_hook)
 
-                self.weight_hh_l0[self.row_indices, self.hh_col_indices] = 0
-                self.weight_hh_l0.register_hook(self._hh_split_hook)
+                self.lstm.weight_hh_l0[self.row_indices, self.hh_col_indices] = 0
+                self.lstm.weight_hh_l0.register_hook(self._hh_split_hook)
 
     def _weight_indices(self, num_const, num_var, num_hidden):
         row_indices = torch.arange(self.hidden_size * 4).view(-1, 1)
@@ -82,13 +83,13 @@ class SplitLSTM(nn.LSTM):
         """
         input = torch.cat((day, items.flatten(start_dim=-2)), dim=-1)
 
-        output, hidden = self.forward_tensor(input, hx)
+        output, hidden = self.lstm(input, hx)        
         output = output.view(items.shape[:-1] + (-1,))
 
         return output, hidden
 
 
-device = torch.device('cuda')
+device = torch.device('cpu')
 num_const = 12  # number of inputs per sub-LSTM that are constant per store-item
 num_var = 3  # number of inputs per sub-LSTM that are different per store-item
 horizon = 3  # number of hidden units per sub-LSTM
