@@ -23,9 +23,8 @@ class SplitLinear(nn.Linear):
             out_features=num_out * num_groups
         )
 
-        self.row_indices, self.col_indices = self._weight_indices(
-            num_const, num_var, num_out
-        )
+        indices = self._weight_indices(num_const, num_var, num_out)
+        self.row_indices, self.col_indices = indices
 
         with torch.no_grad():
             self.weight[self.row_indices, self.col_indices] = 0
