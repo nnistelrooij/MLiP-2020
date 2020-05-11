@@ -82,43 +82,48 @@ class SplitLSTM(nn.Module):
               * Cell state of shape (1, batch_size, num_groups * num_hidden)
         """
         input = torch.cat((day, items.flatten(start_dim=-2)), dim=-1)
+        # print('forward in:', input.shape)
 
-        output, hidden = self.lstm(input, hx)        
+        output, hidden = self.lstm(input, hx)   
+        # print('raw lstm:', output.shape)     
         output = output.view(items.shape[:-1] + (-1,))
+        # print('forward view:', output.shape)
 
         return output, hidden
 
+if __name__ == "__main__":
+    device = torch.device('cpu')
+    num_const = 12  # number of inputs per sub-LSTM that are constant per store-item
+    num_var = 3  # number of inputs per sub-LSTM that are different per store-item
+    horizon = 5  # number of hidden units per sub-LSTM
+    num_groups = 6  # number of store-item groups to make one LSTM for
+    seq_len = 8  # sequence length, number of time points per forward pass
 
-device = torch.device('cpu')
-num_const = 12  # number of inputs per sub-LSTM that are constant per store-item
-num_var = 3  # number of inputs per sub-LSTM that are different per store-item
-horizon = 3  # number of hidden units per sub-LSTM
-num_groups = 3  # number of store-item groups to make one LSTM for
-seq_len = 8  # sequence length, number of time points per forward pass
+    lstm = SplitLSTM(num_const, num_var, horizon, num_groups, independent=True)
+    lstm.to(device)
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.Adam(lstm.parameters())
 
-lstm = SplitLSTM(num_const, num_var, horizon, num_groups, independent=True)
-lstm.to(device)
-criterion = nn.MSELoss()
-optimizer = torch.optim.Adam(lstm.parameters())
+    day = torch.randn(1, seq_len, num_const).to(device)
+    items = torch.randn(1, seq_len, num_groups, num_var).to(device)
+    targets = torch.randn(1, num_groups, horizon).to(device)
 
-day = torch.randn(1, seq_len, num_const).to(device)
-items = torch.randn(1, seq_len, num_groups, num_var).to(device)
-targets = torch.randn(1, num_groups, horizon).to(device)
+    time = datetime.now()
+    for _ in range(2**10):
+        output, hidden = lstm(items, day)
+        output = output[:, 0]
+        print('loop:', output.shape)
+        break
 
-time = datetime.now()
-for _ in range(2**10):
-    output, hidden = lstm(items, day)
-    output = output[:, 0]
+        loss = criterion(output, targets)
 
-    loss = criterion(output, targets)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+    print(datetime.now() - time)
 
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
-print(datetime.now() - time)
+    # slower when dependent, but not a big difference
+    # 4.0s vs. 3.8s on CPU
+    # 6.4s vs. 5.8s on GPU
 
-# slower when dependent, but not a big difference
-# 4.0s vs. 3.8s on CPU
-# 6.4s vs. 5.8s on GPU
-
-i = 3
+    i = 3
