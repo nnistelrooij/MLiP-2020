@@ -105,45 +105,28 @@ def validate(model, val_loader, val_writer, criterion, epoch):
 
     # start iterator with actual sales from previous day
     day, items, t = next(val_loader)
+    seq_len = day.shape[1]
 
     with torch.no_grad():
-        # initialize sales and targets for current day
-        sales = [model(day, items)[:, 0]]
-        targets = [t[..., 0]]
-        print("sales.shape: {}".format(sales[0].shape))
+        # initialize sales and targets columns for current day
+        y = model(day, items)
+        sales = y[..., 0].view(1, -1)
+        targets = t[..., 0].view(1, -1)
 
         for day, items, t in tqdm(val_loader, desc=f'Validation Epoch {epoch}'):
-            ##############################################
-            # TODO: replace sales data in `items` that is available in `sales`
-            # First iteration only one thingy is replaced.
-            # Second iteration only two thingies, third three thingies,
-            # and so on until iteration seq_len, because then
-            # each iteration seq_len thingies are replaced with the
-            # latest seq_len thingies in `sales`.
-            # Pleas ask questions if you don't understand.
-            # This is immensely complex and I suck at explaining it
-            ##############################################
-
             # DONE - check?
             # REMARK: sales are not unit figures
-            if len(sales) <= seq_len:
-                for s in range(len(sales)):
-                    items[0, -1-s, :, 2] = sales[s]
-            elif len(sales) > seq_len:
-                # apply sliding window over last seq_len sales
-                for s in range(seq_len):
-                    items[0, -1 - s, :, 2] = sales[-seq_len+s]
+            items[0, -len(sales):, :, 2] = sales[-seq_len:]
 
-            # predict with sales projections from previous day
+            # predict with sales projections from previous days
             y = model(day, items)
-            sales.append(y[:, 0])
 
-            # add target to targets list
-            targets.append(t[..., 0])
+            # add sales projections and targets to tables
+            sales = torch.cat((sales, y[..., 0].view(1, -1)))
+            targets = torch.cat((targets, t[..., 0].view(1, -1)))
 
     # compute loss over whole horizon
-    sales = torch.stack(sales, dim=1)
-    targets = torch.stack(targets, dim=2)
+    sales, targets = sales.T, targets.T.unsqueeze(0)
     loss = criterion(sales, targets)
 
     # set model mode back to training
@@ -216,9 +199,9 @@ if __name__ == '__main__':
             return torch.randn(self.num_groups, self.horizon) + self.param
 
 
-    # path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning in'
-    #         ' Practice\\Competition 2\\project\\')
-    path =('/Users/mauriceverbrugge/github/MLiP-2020/kaggle/input/m5-forecasting-accuracy/')
+    path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning in'
+            ' Practice\\Competition 2\\project\\')
+    # path =('/Users/mauriceverbrugge/github/MLiP-2020/kaggle/input/m5-forecasting-accuracy/')
     calendar = pd.read_csv(path + 'calendar.csv')
     prices = pd.read_csv(path + 'sell_prices.csv')
     sales = pd.read_csv(path + 'sales_train_validation.csv')
