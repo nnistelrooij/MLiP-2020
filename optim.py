@@ -116,7 +116,7 @@ def validate(model, val_loader, val_writer, criterion, epoch):
         for day, items, t in tqdm(val_loader, desc=f'Validation Epoch {epoch}'):
             # DONE - check?
             # REMARK: sales are not unit figures
-            items[0, -len(sales):, :, 2] = sales[-seq_len:]
+            items[0, -len(sales):, 2] = sales[-seq_len:]
 
             # predict with sales projections from previous days
             y = model(day, items)
