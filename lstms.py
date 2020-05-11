@@ -82,12 +82,9 @@ class SplitLSTM(nn.Module):
               * Cell state of shape (1, batch_size, num_groups * num_hidden)
         """
         input = torch.cat((day, items.flatten(start_dim=-2)), dim=-1)
-        # print('forward in:', input.shape)
 
-        output, hidden = self.lstm(input, hx)   
-        # print('raw lstm:', output.shape)     
+        output, hidden = self.lstm(input, hx)      
         output = output.view(items.shape[:-1] + (-1,))
-        # print('forward view:', output.shape)
 
         return output, hidden
 
@@ -112,8 +109,6 @@ if __name__ == "__main__":
     for _ in range(2**10):
         output, hidden = lstm(items, day)
         output = output[:, 0]
-        print('loop:', output.shape)
-        break
 
         loss = criterion(output, targets)
 

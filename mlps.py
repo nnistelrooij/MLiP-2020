@@ -63,7 +63,7 @@ class SplitLinear(nn.Linear):
         Returns:
             Output of shape (*, num_groups, num_out).
         """
-        day = day.to(torch.device('cpu'))
+        day = day.to(torch.device('cpu')) # TODO make device a member of SplitLinear
         x = torch.cat((day, items.flatten(start_dim=-2)), dim=-1)
 
         y = F.linear(x, self.weight, self.bias)
@@ -150,7 +150,7 @@ if __name__ == '__main__':
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        print('Time for one iteration: ', datetime.now() - iter_time)
+        # print('Time for one iteration: ', datetime.now() - iter_time)
     print(f'Time for {iterations}iterations: ', datetime.now() - time)
 
     i = 3

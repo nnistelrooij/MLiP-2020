@@ -1,4 +1,6 @@
+import math
 from datetime import datetime
+from tqdm import tqdm
 
 import torch
 import torch.nn as nn
@@ -11,7 +13,7 @@ class SubModel(nn.Module):
     def __init__(self, num_const, num_var, num_hidden, num_out, num_groups):
         super(SubModel, self).__init__()
         self.lstm = SplitLSTM(num_const, num_var, num_hidden, num_groups, independent=True) # TODO make independent default
-        self.fc = SplitLinear(0, num_hidden, num_out, num_groups) # TODO add independent parameter
+        self.fc = SplitLinear(0, num_hidden, num_out, num_groups) # TODO add independent parameter for consistency
 
     def forward(self, items, day=torch.tensor([])):
         lstm_out, hidden = self.lstm(items, day)
@@ -20,18 +22,38 @@ class SubModel(nn.Module):
         return y
 
 class Model(nn.Module):
-    def __init__(self, num_const, num_var, num_hidden, num_out, num_groups, num_mlps):
+    def __init__(self, num_const, num_var, num_hidden, num_out, num_groups, num_submodels):
         super(Model, self).__init__()
+        num_submodel_groups = math.floor(num_groups / num_submodels)
+        num_extra_groups = num_groups % num_submodels
+        self.num_groups = [num_submodel_groups + 1] * num_extra_groups
+        self.num_groups += [num_submodel_groups] * (num_submodels - num_extra_groups)
+
+        self.submodels = nn.ModuleList([SubModel(num_const, 
+                                                 num_var, 
+                                                 horizon, 
+                                                 horizon, 
+                                                 num_groups)
+                                        for num_groups in self.num_groups])
+
+    def forward(self, items, day):
+        y = []
+        for i, items in enumerate(items.split(self.num_groups, dim=-2)):
+            y_part = self.submodels[i](items, day)
+            y.append(y_part)
+
+        return torch.cat(y, dim=-2)
 
 if __name__ == "__main__":
     device = torch.device('cpu')
     num_const = 12  # number of inputs per sub-LSTM that are constant per store-item
     num_var = 3  # number of inputs per sub-LSTM that are different per store-item
-    horizon = 7  # number of hidden units per sub-LSTM and output of the entire model (= forecasting horizon)
-    num_groups = 6  # number of store-item groups to make one LSTM for
-    seq_len = 8  # sequence length, number of time points per forward pass
+    horizon = 5  # number of hidden units per sub-LSTM and output of the entire model (= forecasting horizon)
+    num_groups = 3049  # number of store-item groups
+    seq_len = 1  # sequence length, number of time points per forward pass
 
-    model = SubModel(num_const, num_var, horizon, horizon, num_groups)
+    model = Model(num_const, num_var, horizon, horizon, num_groups, 100)
+
     model.to(device)
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters())
@@ -41,7 +63,8 @@ if __name__ == "__main__":
     targets = torch.randn(1, num_groups, horizon).to(device)
 
     time = datetime.now()
-    for _ in range(2**10):
+    iterations = 2**6
+    for _ in tqdm(range(iterations)):
         output = model(items, day)
 
         loss = criterion(output, targets)
@@ -49,4 +72,6 @@ if __name__ == "__main__":
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-    print(datetime.now() - time)
+    duration = datetime.now() - time
+    print(f'Time for {iterations} iterations: ', duration)
+    print(f'Time for one iterations: ', duration / iterations)
