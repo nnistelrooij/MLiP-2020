@@ -110,6 +110,7 @@ def validate(model, val_loader, val_writer, criterion, epoch):
         # initialize sales and targets for current day
         sales = [model(day, items)[:, 0]]
         targets = [t[..., 0]]
+        print("sales.shape: {}".format(sales[0].shape))
 
         for day, items, t in tqdm(val_loader, desc=f'Validation Epoch {epoch}'):
             ##############################################
@@ -122,6 +123,17 @@ def validate(model, val_loader, val_writer, criterion, epoch):
             # Pleas ask questions if you don't understand.
             # This is immensely complex and I suck at explaining it
             ##############################################
+
+            # DONE - check?
+            # REMARK: sales are not unit figures
+            if len(sales) <= seq_len:
+                for s in range(len(sales)):
+                    items[0, -1-s, :, 2] = sales[s]
+            elif len(sales) > seq_len:
+                # apply sliding window over last seq_len sales
+                for s in range(seq_len):
+                    items[0, -1 - s, :, 2] = sales[-seq_len+s]
+
             # predict with sales projections from previous day
             y = model(day, items)
             sales.append(y[:, 0])
@@ -204,8 +216,9 @@ if __name__ == '__main__':
             return torch.randn(self.num_groups, self.horizon) + self.param
 
 
-    path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning in'
-            ' Practice\\Competition 2\\project\\')
+    # path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning in'
+    #         ' Practice\\Competition 2\\project\\')
+    path =('/Users/mauriceverbrugge/github/MLiP-2020/kaggle/input/m5-forecasting-accuracy/')
     calendar = pd.read_csv(path + 'calendar.csv')
     prices = pd.read_csv(path + 'sell_prices.csv')
     sales = pd.read_csv(path + 'sales_train_validation.csv')
