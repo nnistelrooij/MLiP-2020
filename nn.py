@@ -196,9 +196,8 @@ class WRMSSE(nn.Module):
 if __name__ == '__main__':
     from datetime import datetime
 
-    # path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning in'
-    #         ' Practice\\Competition 2\\project\\')
-    path = "/Users/mauriceverbrugge/github/MLiP-2020/kaggle/input/m5-forecasting-accuracy/"
+    path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning '
+            'in Practice\\Competition 2\\project\\')
     calendar = pd.read_csv(path + 'calendar.csv')
     prices = pd.read_csv(path + 'sell_prices.csv')
     sales = pd.read_csv(path + 'sales_train_validation.csv')
