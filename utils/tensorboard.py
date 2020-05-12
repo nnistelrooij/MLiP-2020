@@ -38,7 +38,7 @@ class TensorBoardWriter(SummaryWriter):
         TensorBoardWriter.num_days += self.train
 
         # update running loss
-        self.running_loss += loss.data
+        self.running_loss += loss.detach()
 
         # show loss every eval_freq days
         if self.num_days % self.eval_freq == 0:
