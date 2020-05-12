@@ -57,7 +57,7 @@ class ReduceLROnPlateau(object):
         self.writer.show_learning_rate(params['lr'])
 
 
-def train(model, train_loader, train_writer, optimizer, criterion, epoch):
+def train(model, loader, train_writer, optimizer, criterion, epoch, num_days):
     """Update model parameters given losses on train data.
 
     Args:
@@ -67,8 +67,11 @@ def train(model, train_loader, train_writer, optimizer, criterion, epoch):
         optimizer    = [Optimizer] optimizer to update the model
         criterion    = [nn.Module] neural network module to compute loss
         epoch        = [int] current iteration over the training data set
+        num_days     = [int] number of days to validate
     """
-    for day, items, t in tqdm(train_loader, desc=f'Train Epoch {epoch}'):
+    for _ in tqdm(range(len(loader) - num_days), desc=f'Train Epoch {epoch}'):
+        day, items, t = next(loader)
+
         # predict
         y = model(day, items)
 
@@ -101,25 +104,29 @@ def validate(model, val_loader, val_writer, criterion, epoch):
     model.eval()
 
     # start iterator with actual sales from previous day
-    val_loader = iter(val_loader)
     day, items, t = next(val_loader)
+    seq_len = day.shape[1]
 
     with torch.no_grad():
-        # initialize sales and targets for current day
-        sales = [model(day, items)[0]]
-        targets = [t]
+        # initialize sales and targets columns for current day
+        y = model(day, items)
+        sales = y[..., 0].view(1, -1)
+        targets = t[..., 0].view(1, -1)
 
         for day, items, t in tqdm(val_loader, desc=f'Validation Epoch {epoch}'):
-            # predict with sales projections from previous day
-            y = model(day, items, sales)
-            sales.append(y[0])
+            # DONE - check?
+            # REMARK: sales are not unit figures
+            items[0, -len(sales):, 2] = sales[-seq_len:]
 
-            # add target to targets list
-            targets.append(t)
+            # predict with sales projections from previous days
+            y = model(day, items)
+
+            # add sales projections and targets to tables
+            sales = torch.cat((sales, y[..., 0].view(1, -1)))
+            targets = torch.cat((targets, t[..., 0].view(1, -1)))
 
     # compute loss over whole horizon
-    sales = torch.stack(sales, dim=1)
-    targets = torch.stack(targets, dim=1)
+    sales, targets = sales.T, targets.T.unsqueeze(0)
     loss = criterion(sales, targets)
 
     # set model mode back to training
@@ -132,8 +139,8 @@ def validate(model, val_loader, val_writer, criterion, epoch):
 
 
 def optimize(model,
-             train_loader, train_writer,
-             val_loader, val_writer,
+             loader, train_writer,
+             val_writer, num_days,
              optimizer, scheduler,
              criterion,
              num_epochs,
@@ -142,10 +149,10 @@ def optimize(model,
 
     Args:
         model        = [nn.Module] model to train and validate
-        train_loader = [DataLoader] train data loader
+        loader       = [DataLoader] data loader
         train_writer = [MetricWriter] TensorBoard writer of train metrics
-        val_loader   = [DataLoader] validation data loader
         val_writer   = [MetricWriter] TensorBoard writer of validation metrics
+        num_days     = [int] number of days to validate
         optimizer    = [Optimizer] optimizer to update the model
         scheduler    = [object] scheduler to update the learning rates
         criterion    = [nn.Module] neural network module to compute losses
@@ -153,11 +160,13 @@ def optimize(model,
         model_path   = [str] path where trained model is saved
     """
     for epoch in range(1, num_epochs + 1):
+        loader2 = iter(loader)
+
         # update model weights given losses on train data
-        train(model, train_loader, train_writer, optimizer, criterion, epoch)
+        train(model, loader2, train_writer, optimizer, criterion, epoch, num_days)
 
         # determine score on validation data
-        val_score = validate(model, val_loader, val_writer, criterion, epoch)
+        val_score = validate(model, loader2, val_writer, criterion, epoch)
 
         # update learning rate given validation score
         scheduler.step(val_score)
@@ -165,3 +174,57 @@ def optimize(model,
         # save best-performing model to storage
         if val_score == scheduler.best:
             torch.save(model.state_dict(), model_path)
+
+
+if __name__ == '__main__':
+    import os
+    import pandas as pd
+    import torch.nn as nn
+    from torch.utils.data import DataLoader
+
+    from nn import WRMSSE
+    from utils.data import ForecastDataset
+    from utils.tensorboard import TensorBoardWriter
+
+    class Model(nn.Module):
+        def __init__(self, num_groups=30490, horizon=5):
+            super(Model, self).__init__()
+
+            self.param = nn.Parameter(torch.tensor(10.0))
+
+            self.num_groups = num_groups
+            self.horizon = horizon
+
+        def forward(self, x, y):
+            return torch.randn(self.num_groups, self.horizon) + self.param
+
+
+    path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning in'
+            ' Practice\\Competition 2\\project\\')
+    # path =('/Users/mauriceverbrugge/github/MLiP-2020/kaggle/input/m5-forecasting-accuracy/')
+    calendar = pd.read_csv(path + 'calendar.csv')
+    prices = pd.read_csv(path + 'sell_prices.csv')
+    sales = pd.read_csv(path + 'sales_train_validation.csv')
+
+    seq_len = 8
+    horizon = 5
+
+    loader = ForecastDataset(calendar, prices, sales.iloc[:, :100], seq_len=seq_len, horizon=horizon)
+    loader = DataLoader(loader)
+
+    train_writer = TensorBoardWriter('cpu', True, log_dir='runs/train/')
+    val_writer = TensorBoardWriter('cpu', False, log_dir='runs/val/')
+
+    model = Model(horizon=horizon)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+    criterion = WRMSSE('cpu', calendar, prices, sales)
+
+    if not os.path.exists('models/'):
+        os.mkdir('models/')
+    optimize(model, loader, train_writer, val_writer, 28,
+             optimizer, ReduceLROnPlateau(val_writer, optimizer), criterion,
+             100, 'models/model.pt')
+
+
+    i = 3
+

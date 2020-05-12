@@ -45,7 +45,7 @@ class WRMSSE(nn.Module):
             Scale of each time series.
         """
         # select columns with unit sales and convert to torch.Tensor
-        sales = torch.tensor(sales.filter(like='d_').to_numpy())
+        sales = torch.tensor(sales.filter(like='d_').to_numpy()).float()
 
         # aggregate unit sales for each level of the time series hierarchy
         aggregates = self._aggregate(
@@ -56,7 +56,7 @@ class WRMSSE(nn.Module):
         squared_deltas = (aggregates[:, 1:] - aggregates[:, :-1])**2
         scales = torch.sum(squared_deltas, dim=1) / (sales.shape[1] - 1)
 
-        return scales.to(self.device, dtype=torch.float32)
+        return scales.to(self.device)
 
     def _time_series_weights(self, calendar, prices, sales):
         """Computes the weight of each time series.
@@ -87,7 +87,7 @@ class WRMSSE(nn.Module):
         permutations, group_indices = self._indices(data)
 
         # select column with revenues and convert to torch.Tensor
-        revenues = torch.tensor(data['revenue'].to_numpy())
+        revenues = torch.tensor(data['revenue'].to_numpy()).float()
 
         # aggregate revenues for each level of the time series hierarchy
         aggregates = self._aggregate(revenues, permutations, group_indices)
@@ -96,7 +96,7 @@ class WRMSSE(nn.Module):
         total = aggregates[0]
         weights = aggregates / total
 
-        return weights.to(self.device, dtype=torch.float32)
+        return weights.to(self.device)
 
     @staticmethod
     def _indices(df):
@@ -175,13 +175,13 @@ class WRMSSE(nn.Module):
         # select correct columns and aggregate to all levels of the hierarchy
         input = input[:, :horizon]
         projected_sales = self._aggregate(
-            input, self._permutations, self._group_indices
+            input, self.permutations, self.group_indices
         )
 
         # remove batch dim, put on GPU, and aggregate to all levels of hierarchy
         target = target.squeeze(0).to(self.device)
         actual_sales = self._aggregate(
-            target, self._permutations, self._group_indices
+            target, self.permutations, self.group_indices
         )
 
         # compute WRMSSE loss
@@ -202,7 +202,8 @@ if __name__ == '__main__':
     prices = pd.read_csv(path + 'sell_prices.csv')
     sales = pd.read_csv(path + 'sales_train_validation.csv')
 
-    device = torch.device('cuda')
+    # device = torch.device('cuda')
+    device = torch.device('cpu')
     time = datetime.now()
     criterion = WRMSSE(device, calendar, prices, sales)
     print('Time to initialize loss: ', datetime.now() - time)

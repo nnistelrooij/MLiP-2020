@@ -6,3 +6,6 @@
 .vscode/
 
 kaggle/
+
+runs/
+models/
