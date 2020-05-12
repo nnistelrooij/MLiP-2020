@@ -13,7 +13,7 @@ class TensorBoardWriter(SummaryWriter):
     """
     num_days = 0
 
-    def __init__(self, device, train, eval_freq, log_dir=None):
+    def __init__(self, device, train, eval_freq=100, log_dir=None):
         """Initialize this class as subclass of SummaryWriter.
 
         Args:

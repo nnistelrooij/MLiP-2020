@@ -149,12 +149,12 @@ class ForecastDataset(Dataset):
                 months    = one-hot vectors of shape (seq_len, 12)
                 years     = one-hot vectors of shape (seq_len, 6)
                 events    = one-hot vectors of shape (seq_len, 5)
-            items   = data different per store-item of shape (seq_len, N, 3)
+            items   = data different per store-item of shape (seq_len, 3, N)
                 snap      = booleans of shape (seq_len, N)
                 prices    = floats of shape (seq_len, N)
                 sales     = integers of shape (seq_len, N)
             targets = unit sales of next days of shape (N, |targets|), where
-                0 <= |self.sales| - seq_len - idx = |targets| <= horizon
+                1 <= |self.sales| - seq_len - idx = |targets| <= horizon
 
         If horizon = 0, i.e. inference mode, then sales has a variable
         length, which  means that it needs to be returned separately. So
@@ -168,7 +168,7 @@ class ForecastDataset(Dataset):
                 months    = one-hot vectors of shape (seq_len, 12)
                 years     = one-hot vectors of shape (seq_len, 6)
                 events    = one-hot vectors of shape (seq_len, 5)
-            items = data different per store-item of shape (seq_len, N, 2)
+            items = data different per store-item of shape (seq_len, 2, N)
                 snap      = booleans of shape (seq_len, N)
                 prices    = floats of shape (seq_len, N)
             sales = unit sales of previous days of shape (|sales|, N), where
@@ -186,7 +186,7 @@ class ForecastDataset(Dataset):
                 self.snap[idx + 1:end_idx + 1],
                 self.prices[idx + 1:end_idx + 1],
                 self.sales[idx:end_idx]),
-                axis=2
+                axis=1
             )
 
             # get targets in shape (N, |targets|)
@@ -198,7 +198,7 @@ class ForecastDataset(Dataset):
             items = np.stack((
                 self.snap[idx + 1:end_idx + 1],
                 self.prices[idx + 1:end_idx + 1]),
-                axis=2
+                axis=1
             )
 
             # return sales separately, because it has a variable length
