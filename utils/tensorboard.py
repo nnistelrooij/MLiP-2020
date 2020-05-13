@@ -7,41 +7,41 @@ class TensorBoardWriter(SummaryWriter):
 
     Attributes:
         num_days     = [int] number of days the model has been training for
-        train        = [bool] whether the losses are for training or validation
+        num_batches  = [int] number of batches since writer initialization
         eval_freq    = [int] number of days before the next TensorBoard update
-        running_loss = [torch.Tensor] running loss to for smoothing loss plot
+        running_loss = [torch.Tensor] running loss for smoothing loss plot
     """
     num_days = 0
 
-    def __init__(self, device, train, eval_freq=100, log_dir=None):
+    def __init__(self, eval_freq=100, log_dir=None):
         """Initialize this class as subclass of SummaryWriter.
 
         Args:
-            device    = [torch.device] device to compute the running loss on
-            train     = [bool] whether the losses are for training or validation
             eval_freq = [int] number of days before the next TensorBoard update
             log_dir   = [str] directory to store the run data file
         """
         super(TensorBoardWriter, self).__init__(log_dir)
 
-        self.train = train
+        self.num_batches = 0
         self.eval_freq = eval_freq
-        self.running_loss = torch.zeros(1, device=device)
+        self.running_loss = torch.tensor(0.0)
 
-    def show_loss(self, loss):
+    def show_loss(self, loss, num_days=0):
         """Show the loss on TensorBoard.
 
         Args:
-            loss = [torch.Tensor] loss on the current day of data
+            loss     = [torch.Tensor] loss on the current day of data
+            num_days = [int] number of training days in current batch
         """
-        # increment day counter
-        TensorBoardWriter.num_days += self.train
+        # increase day and batch counters
+        TensorBoardWriter.num_days += num_days
+        self.num_batches += 1
 
         # update running loss
-        self.running_loss += loss.detach()
+        self.running_loss += loss.detach().cpu()
 
-        # show loss every eval_freq days
-        if self.num_days % self.eval_freq == 0:
+        # show loss every eval_freq batches
+        if self.num_batches % self.eval_freq == 0:
             # show loss on TensorBoard
             loss = self.running_loss / self.eval_freq
             self.add_scalar('loss', loss, TensorBoardWriter.num_days)

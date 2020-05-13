@@ -74,13 +74,12 @@ def train(model, train_loader, train_writer, optimizer, criterion, epoch):
 
         # compute loss and show on TensorBoard every 100 days
         loss = criterion(y, t)
-        train_writer.show_loss(loss)
+        train_writer.show_loss(loss, day.shape[1])
 
         # update model's parameters
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-
 
 
 def validate(model, val_loader, val_writer, criterion, epoch):
@@ -205,8 +204,8 @@ if __name__ == '__main__':
     val_dataset = ForecastDataset(calendar, prices, val_sales)
     val_loader = DataLoader(val_dataset)
 
-    train_writer = TensorBoardWriter('cpu', True, log_dir='runs/train/')
-    val_writer = TensorBoardWriter('cpu', False, eval_freq=1, log_dir='runs/val/')
+    train_writer = TensorBoardWriter(log_dir='runs/train/')
+    val_writer = TensorBoardWriter(eval_freq=1, log_dir='runs/val/')
 
     model = Model(horizon=horizon)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
