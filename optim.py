@@ -162,6 +162,9 @@ def optimize(model,
     for epoch in range(1, num_epochs + 1):
         loader2 = iter(loader)
 
+        # reset hidden state of model each epoch
+        model.reset_hidden()
+
         # update model weights given losses on train data
         train(model, loader2, train_writer, optimizer, criterion, epoch, num_days)
 
