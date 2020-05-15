@@ -10,14 +10,14 @@ from mlps import SplitLinear
 from lstms import SplitLSTM
 
 class SubModel(nn.Module):
-    def __init__(self, num_const, num_var, num_hidden, num_out, num_groups, num_batch):
+    def __init__(self, num_const, num_var, num_hidden, num_out, num_groups, num_batch, independent):
         super(SubModel, self).__init__()
         self.num_hidden = num_hidden
         self.num_groups = num_groups
         self.num_batch = num_batch
 
-        self.lstm = SplitLSTM(num_const, num_var, num_hidden, num_groups, independent=True) # TODO make independent default
-        self.fc = SplitLinear(0, num_hidden, num_out, num_groups) # TODO add independent parameter for consistency
+        self.lstm = SplitLSTM(num_const, num_var, num_hidden, num_groups, independent)
+        self.fc = SplitLinear(0, num_hidden, num_out, num_groups, independent)
 
         self.hidden = (torch.zeros(1, num_batch, num_hidden*num_groups),
                        torch.zeros(1, num_batch, num_hidden*num_groups))
@@ -33,7 +33,7 @@ class SubModel(nn.Module):
         return y
 
 class Model(nn.Module):
-    def __init__(self, num_const, num_var, num_hidden, num_out, num_groups, num_batch, num_submodels):
+    def __init__(self, num_const, num_var, num_hidden, num_out, num_groups, num_batch, num_submodels, independent=True):
         super(Model, self).__init__()
         num_submodel_groups = math.floor(num_groups / num_submodels)
         num_extra_groups = num_groups % num_submodels
@@ -45,7 +45,8 @@ class Model(nn.Module):
                                                  horizon, 
                                                  horizon, 
                                                  num_groups,
-                                                 num_batch)
+                                                 num_batch,
+                                                 independent)
                                         for num_groups in self.num_groups])
 
     def reset_hidden(self):
