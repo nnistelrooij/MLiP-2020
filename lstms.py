@@ -65,11 +65,11 @@ class SplitLSTM(nn.Module):
 
         return grad
 
-    def _detach_hidden(self, h):
-        hx, cx = h
-        return hx.detach(), cx.detach()
+    def _detach_hidden(self, hx):
+        h_n, c_n = hx
+        return h_n.detach(), c_n.detach()
 
-    def forward(self, items, day=torch.tensor([]), h=None):
+    def forward(self, items, day=torch.tensor([]), hx=None):
         """Forward pass of split LSTM.
 
         Args:
@@ -87,8 +87,8 @@ class SplitLSTM(nn.Module):
         """
         input = torch.cat((day, items.flatten(start_dim=-2)), dim=-1)   
 
-        h = self._detach_hidden(h) if h else h
-        output, hidden = self.lstm(input, h)
+        hx = self._detach_hidden(hx) if hx else hx
+        output, hidden = self.lstm(input, hx)
         output = output.view(items.shape[:-1] + (-1,))
 
         return output, hidden

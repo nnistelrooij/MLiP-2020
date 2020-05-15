@@ -17,6 +17,7 @@ class SubModel(nn.Module):
         self.num_batch = num_batch
 
         self.lstm = SplitLSTM(num_const, num_var, num_hidden, num_groups, independent)
+        self.bn = nn.BatchNorm1d(num_groups)
         self.fc = SplitLinear(0, num_hidden, num_out, num_groups, independent)
 
         self.hidden = (torch.zeros(1, num_batch, num_hidden*num_groups),
@@ -28,7 +29,7 @@ class SubModel(nn.Module):
 
     def forward(self, items, day=torch.tensor([])):
         lstm_out, self.hidden = self.lstm(items, day, self.hidden)
-        lstm_out = lstm_out[:, -1] # take last day from sequence
+        lstm_out = self.bn(lstm_out[:, -1]) # take last day from sequence
         y = self.fc(lstm_out)
         return y
 
