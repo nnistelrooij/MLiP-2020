@@ -15,9 +15,9 @@ class SubModel(nn.Module):
         self.lstm = SplitLSTM(num_const, num_var, num_hidden, num_groups, independent=True) # TODO make independent default
         self.fc = SplitLinear(0, num_hidden, num_out, num_groups) # TODO add independent parameter for consistency
 
-    def forward(self, items, day=torch.tensor([])):
+    def forward(self, day, items):
         lstm_out, hidden = self.lstm(items, day)
-        lstm_out = lstm_out[:, -1] # take last day from sequence
+        lstm_out = lstm_out[-1] # take last day from sequence
         y = self.fc(lstm_out)
         return y
 
@@ -31,15 +31,15 @@ class Model(nn.Module):
 
         self.submodels = nn.ModuleList([SubModel(num_const, 
                                                  num_var, 
-                                                 horizon, 
-                                                 horizon, 
+                                                 num_hidden,
+                                                 num_out,
                                                  num_groups)
                                         for num_groups in self.num_groups])
 
-    def forward(self, items, day):
+    def forward(self, day, items):
         y = []
-        for i, items in enumerate(items.split(self.num_groups, dim=-2)):
-            y_part = self.submodels[i](items, day)
+        for i, items in enumerate(items.split(self.num_groups, dim=-1)):
+            y_part = self.submodels[i](day, items)
             y.append(y_part)
 
         return torch.cat(y, dim=-2)

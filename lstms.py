@@ -83,8 +83,8 @@ class SplitLSTM(nn.Module):
         """
         input = torch.cat((day, items.flatten(start_dim=-2)), dim=-1)
 
-        output, hidden = self.lstm(input, hx)      
-        output = output.view(items.shape[:-1] + (-1,))
+        output, hidden = self.lstm(input, hx)
+        output = output.view(items.shape[1], items.shape[-1], -1)
 
         return output, hidden
 
