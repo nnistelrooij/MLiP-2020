@@ -13,7 +13,7 @@ def tes_t(model, loader):
     for day, items in tqdm(loader):
         if items.shape[2] == 2:
             projection = projections[-1].view(1, 1, 1, items.shape[-1])
-            items = torch.cat((items, projection), dim=2)
+            items = torch.cat((items, projection.to('cpu')), dim=2)
 
         y = model(day, items)
         projections.append(y[:, 0])
@@ -22,24 +22,25 @@ def tes_t(model, loader):
 
 
 if __name__ == '__main__':
-    device = torch.device('cpu')
+    device = torch.device('cuda')
     num_const = 32  # number of inputs per sub-LSTM that are constant per store-item
     num_var = 3  # number of inputs per sub-LSTM that are different per store-item
     horizon = 5  # number of hidden units per sub-LSTM and output of the entire model (= forecasting horizon)
     num_groups = 30490  # number of store-item groups
 
-    model = Model(num_const, num_var, horizon, horizon, num_groups, 30490)
+    model = Model(num_const, num_var, horizon, horizon, num_groups, 1000, device)
     model.to(device)
     model.eval()
     # model.load_state_dict(torch.load('model.pt', map_location=device))
 
-    path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning '
-            'in Practice\\Competition 2\\project\\')
-    calendar = pd.read_csv(path + 'calendar.csv').iloc[-365:]
-    sales = pd.read_csv(path + 'sales_train_validation.csv')
+    # path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning '
+    #         'in Practice\\Competition 2\\project\\')
+    path = r'C:\Users\Niels\Downloads\MLiP-2020'
+    calendar = pd.read_csv(path + r'\calendar.csv').iloc[-365:]
+    sales = pd.read_csv(path + r'\sales_train_validation.csv')
     sales = pd.concat((sales.iloc[:, :6], sales.iloc[:, -365+28+28:]), axis=1)
     sales = sales.sort_values(by=['store_id', 'item_id'])
-    prices = pd.read_csv(path + 'sell_prices.csv')
+    prices = pd.read_csv(path + r'\sell_prices.csv')
 
     dataset = ForecastDataset(calendar, prices, sales, seq_len=1, horizon=0)
     loader = DataLoader(dataset)

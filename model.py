@@ -22,7 +22,7 @@ class SubModel(nn.Module):
         return y
 
 class Model(nn.Module):
-    def __init__(self, num_const, num_var, num_hidden, num_out, num_groups, num_submodels):
+    def __init__(self, num_const, num_var, num_hidden, num_out, num_groups, num_submodels, device):
         super(Model, self).__init__()
         num_submodel_groups = math.floor(num_groups / num_submodels)
         num_extra_groups = num_groups % num_submodels
@@ -36,7 +36,11 @@ class Model(nn.Module):
                                                  num_groups)
                                         for num_groups in self.num_groups])
 
+        self.device = device
+
     def forward(self, day, items):
+        day = day.to(self.device)
+        items = items.to(self.device)
         y = []
         for i, items in enumerate(items.split(self.num_groups, dim=-1)):
             y_part = self.submodels[i](day, items)

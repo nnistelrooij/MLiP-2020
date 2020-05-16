@@ -63,7 +63,7 @@ class SplitLinear(nn.Linear):
         Returns:
             Output of shape (*, num_groups, num_out).
         """
-        day = day.to(torch.device('cpu')) # TODO make device a member of SplitLinear
+        day = day.to(torch.device(items.device)) # TODO make device a member of SplitLinear
         x = torch.cat((day, items.flatten(start_dim=-2)), dim=-1)
 
         y = F.linear(x, self.weight, self.bias)
