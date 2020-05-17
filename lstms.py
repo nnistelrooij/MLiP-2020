@@ -15,6 +15,8 @@ class SplitLSTM(nn.Module):
                             hidden_size=self.hidden_size,
                             batch_first=True)
 
+        self.hidden = None
+
         if independent:
             indices = self._weight_indices(num_const, num_var, num_hidden)
             self.row_indices, self.ih_col_indices, self.hh_col_indices = indices
@@ -25,6 +27,9 @@ class SplitLSTM(nn.Module):
 
                 self.lstm.weight_hh_l0[self.row_indices, self.hh_col_indices] = 0
                 self.lstm.weight_hh_l0.register_hook(self._hh_split_hook)
+
+    def reset_hidden():
+        self.hidden = None
 
     def _weight_indices(self, num_const, num_var, num_hidden):
         row_indices = torch.arange(self.hidden_size * 4).view(-1, 1)
@@ -69,7 +74,7 @@ class SplitLSTM(nn.Module):
         h_n, c_n = hx
         return h_n.detach(), c_n.detach()
 
-    def forward(self, items, day=torch.tensor([]), hx=None):
+    def forward(self, items, day=torch.tensor([])):
         """Forward pass of split LSTM.
 
         Args:
@@ -87,11 +92,11 @@ class SplitLSTM(nn.Module):
         """
         input = torch.cat((day, items.flatten(start_dim=-2)), dim=-1)   
 
-        hx = self._detach_hidden(hx) if hx else hx
-        output, hidden = self.lstm(input, hx)
+        hx = self._detach_hidden(self.hidden) if self.hidden else self.hidden
+        output, self.hidden = self.lstm(input, hx)
         output = output.view(items.shape[:-1] + (-1,))
 
-        return output, hidden
+        return output, self.hidden
 
 if __name__ == "__main__":
     device = torch.device('cpu')

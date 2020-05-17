@@ -10,31 +10,23 @@ from mlps import SplitLinear
 from lstms import SplitLSTM
 
 class SubModel(nn.Module):
-    def __init__(self, num_const, num_var, num_hidden, num_out, num_groups, num_batch, independent):
+    def __init__(self, num_const, num_var, num_hidden, num_out, num_groups, independent):
         super(SubModel, self).__init__()
-        self.num_hidden = num_hidden
-        self.num_groups = num_groups
-        self.num_batch = num_batch
-
         self.lstm = SplitLSTM(num_const, num_var, num_hidden, num_groups, independent)
         self.bn = nn.BatchNorm1d(num_groups)
         self.fc = SplitLinear(0, num_hidden, num_out, num_groups, independent)
-
-        self.hidden = (torch.zeros(1, num_batch, num_hidden*num_groups),
-                       torch.zeros(1, num_batch, num_hidden*num_groups))
                     
     def reset_hidden(self):
-        self.hidden = (torch.zeros(1, self.num_batch, self.num_hidden*self.num_groups),
-                       torch.zeros(1, self.num_batch, self.num_hidden*self.num_groups))
+        self.lstm.reset_hidden()
 
     def forward(self, items, day=torch.tensor([])):
-        lstm_out, self.hidden = self.lstm(items, day, self.hidden)
+        lstm_out, _ = self.lstm(items, day)
         lstm_out = self.bn(lstm_out[:, -1]) # take last day from sequence
         y = self.fc(lstm_out)
         return y
 
 class Model(nn.Module):
-    def __init__(self, num_const, num_var, num_hidden, num_out, num_groups, num_batch, num_submodels, independent=True):
+    def __init__(self, num_const, num_var, num_hidden, num_out, num_groups, num_submodels, independent=True):
         super(Model, self).__init__()
         num_submodel_groups = math.floor(num_groups / num_submodels)
         num_extra_groups = num_groups % num_submodels
@@ -43,10 +35,9 @@ class Model(nn.Module):
 
         self.submodels = nn.ModuleList([SubModel(num_const, 
                                                  num_var, 
-                                                 horizon, 
-                                                 horizon, 
+                                                 num_hidden, 
+                                                 num_out, 
                                                  num_groups,
-                                                 num_batch,
                                                  independent)
                                         for num_groups in self.num_groups])
 
@@ -69,9 +60,8 @@ if __name__ == "__main__":
     horizon = 5  # number of hidden units per sub-LSTM and output of the entire model (= forecasting horizon)
     num_groups = 3049 # number of store-item groups
     seq_len = 1  # sequence length, number of time points per forward pass
-    num_batch = 1 # batch size (need to know batch size for LSTM hidden state initialization)
 
-    model = Model(num_const, num_var, horizon, horizon, num_groups, num_batch, 100)
+    model = Model(num_const, num_var, horizon, horizon, num_groups, 100)
 
     model.to(device)
     criterion = nn.MSELoss()
