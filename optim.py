@@ -151,6 +151,9 @@ def optimize(model,
         model_path   = [str] path where trained model is saved
     """
     for epoch in range(1, num_epochs + 1):
+        # reset hidden state of model each epoch
+        model.reset_hidden()
+        
         # update model weights given losses on train data
         train(model, train_loader, train_writer, optimizer, criterion, epoch)
 
