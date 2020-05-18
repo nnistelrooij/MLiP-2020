@@ -1,4 +1,3 @@
-import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader
@@ -8,10 +7,20 @@ from utils.data import ForecastDataset
 from model import Model
 
 
-def tes_t(model, loader):
+def infer(model, loader):
+    """Infer the unit sales with the model.
+
+    Args:
+        model  = [nn.Module] trained model
+        loader = [DataLoader] dataloader with last year of available data
+
+    Returns [[torch.Tensor]*2]:
+        validation = sales projections of next 28 days
+        evaluation = sales projects of next 28 days after validation
+    """
     projections = []
     for day, items in tqdm(loader):
-        if items.shape[2] == 2:
+        if items.shape[2] == 2:  # use sales projections at end of data
             projection = projections[-1].view(1, 1, 1, items.shape[-1])
             items = torch.cat((items, projection.to('cpu')), dim=2)
 
@@ -33,9 +42,8 @@ if __name__ == '__main__':
     model.eval()
     # model.load_state_dict(torch.load('model.pt', map_location=device))
 
-    # path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning '
-    #         'in Practice\\Competition 2\\project\\')
-    path = r'C:\Users\Niels\Downloads\MLiP-2020'
+    path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning '
+            'in Practice\\Competition 2\\project\\')
     calendar = pd.read_csv(path + r'\calendar.csv').iloc[-365:]
     sales = pd.read_csv(path + r'\sales_train_validation.csv')
     sales = pd.concat((sales.iloc[:, :6], sales.iloc[:, -365+28+28:]), axis=1)
@@ -45,7 +53,7 @@ if __name__ == '__main__':
     dataset = ForecastDataset(calendar, prices, sales, seq_len=1, horizon=0)
     loader = DataLoader(dataset)
 
-    validation, evaluation = tes_t(model, loader)
+    validation, evaluation = infer(model, loader)
     columns = [f'F{i}' for i in range(1, 29)]
 
     validation = pd.DataFrame(validation.tolist(), columns=columns)
