@@ -57,7 +57,7 @@ class ReduceLROnPlateau(object):
         self.writer.show_learning_rate(params['lr'])
 
 
-def train(model, loader, train_writer, optimizer, criterion, epoch, num_days):
+def train(model, train_loader, train_writer, optimizer, criterion, epoch):
     """Update model parameters given losses on train data.
 
     Args:
@@ -67,24 +67,19 @@ def train(model, loader, train_writer, optimizer, criterion, epoch, num_days):
         optimizer    = [Optimizer] optimizer to update the model
         criterion    = [nn.Module] neural network module to compute loss
         epoch        = [int] current iteration over the training data set
-        num_days     = [int] number of days to validate
     """
-    for _ in tqdm(range(len(loader) - num_days), desc=f'Train Epoch {epoch}'):
-        day, items, t = next(loader)
-
+    for day, items, t in tqdm(train_loader, desc=f'Train Epoch {epoch}'):
         # predict
         y = model(day, items)
 
-        # loss
+        # compute loss and show on TensorBoard every 100 days
         loss = criterion(y, t)
+        train_writer.show_loss(loss, day.shape[1])
 
-        # update
+        # update model's parameters
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-
-        # show loss every 100 days on TensorBoard
-        train_writer.show_loss(loss)
 
 
 def validate(model, val_loader, val_writer, criterion, epoch):
@@ -104,43 +99,39 @@ def validate(model, val_loader, val_writer, criterion, epoch):
     model.eval()
 
     # start iterator with actual sales from previous day
+    val_loader = iter(val_loader)
     day, items, t = next(val_loader)
-    seq_len = day.shape[1]
 
     with torch.no_grad():
         # initialize sales and targets columns for current day
         y = model(day, items)
-        sales = y[..., 0].view(1, -1)
-        targets = t[..., 0].view(1, -1)
+        sales = y[:, :1]
+        targets = t[..., :1]
 
         for day, items, t in tqdm(val_loader, desc=f'Validation Epoch {epoch}'):
-            # DONE - check?
-            # REMARK: sales are not unit figures
-            items[0, -len(sales):, 2] = sales[-seq_len:]
+            # replace actual sales in items with projected sales
+            items[0, 0, 2] = sales[:, -1]
 
             # predict with sales projections from previous days
             y = model(day, items)
 
             # add sales projections and targets to tables
-            sales = torch.cat((sales, y[..., 0].view(1, -1)))
-            targets = torch.cat((targets, t[..., 0].view(1, -1)))
+            sales = torch.cat((sales, y[:, :1]), dim=1)
+            targets = torch.cat((targets, t[..., :1]), dim=2)
 
-    # compute loss over whole horizon
-    sales, targets = sales.T, targets.T.unsqueeze(0)
+    # compute loss over whole horizon and show on TensorBoard
     loss = criterion(sales, targets)
+    val_writer.show_loss(loss)
 
     # set model mode back to training
     model.train()
-
-    # show validation loss on TensorBoard
-    val_writer.show_loss(loss)
 
     return loss
 
 
 def optimize(model,
-             loader, train_writer,
-             val_writer, num_days,
+             train_loader, train_writer,
+             val_loader, val_writer,
              optimizer, scheduler,
              criterion,
              num_epochs,
@@ -149,10 +140,10 @@ def optimize(model,
 
     Args:
         model        = [nn.Module] model to train and validate
-        loader       = [DataLoader] data loader
+        train_loader = [DataLoader] DataLoader for training data
         train_writer = [MetricWriter] TensorBoard writer of train metrics
+        val_loader   = [DataLoader] DataLoader for validation data
         val_writer   = [MetricWriter] TensorBoard writer of validation metrics
-        num_days     = [int] number of days to validate
         optimizer    = [Optimizer] optimizer to update the model
         scheduler    = [object] scheduler to update the learning rates
         criterion    = [nn.Module] neural network module to compute losses
@@ -160,13 +151,11 @@ def optimize(model,
         model_path   = [str] path where trained model is saved
     """
     for epoch in range(1, num_epochs + 1):
-        loader2 = iter(loader)
-
         # update model weights given losses on train data
-        train(model, loader2, train_writer, optimizer, criterion, epoch, num_days)
+        train(model, train_loader, train_writer, optimizer, criterion, epoch)
 
         # determine score on validation data
-        val_score = validate(model, loader2, val_writer, criterion, epoch)
+        val_score = validate(model, val_loader, val_writer, criterion, epoch)
 
         # update learning rate given validation score
         scheduler.step(val_score)
@@ -201,19 +190,22 @@ if __name__ == '__main__':
 
     path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning in'
             ' Practice\\Competition 2\\project\\')
-    # path =('/Users/mauriceverbrugge/github/MLiP-2020/kaggle/input/m5-forecasting-accuracy/')
     calendar = pd.read_csv(path + 'calendar.csv')
     prices = pd.read_csv(path + 'sell_prices.csv')
     sales = pd.read_csv(path + 'sales_train_validation.csv')
+    train_sales = pd.concat((sales.iloc[:, :6], sales.iloc[:, 1548:-28]), axis=1)
+    val_sales = pd.concat((sales.iloc[:, :6], sales.iloc[:, -28:]), axis=1)
 
     seq_len = 8
     horizon = 5
+    train_dataset = ForecastDataset(calendar, prices, train_sales, seq_len, horizon)
+    train_loader = DataLoader(train_dataset)
 
-    loader = ForecastDataset(calendar, prices, sales.iloc[:, :100], seq_len=seq_len, horizon=horizon)
-    loader = DataLoader(loader)
+    val_dataset = ForecastDataset(calendar, prices, val_sales)
+    val_loader = DataLoader(val_dataset)
 
-    train_writer = TensorBoardWriter('cpu', True, log_dir='runs/train/')
-    val_writer = TensorBoardWriter('cpu', False, log_dir='runs/val/')
+    train_writer = TensorBoardWriter(log_dir='runs/train/')
+    val_writer = TensorBoardWriter(eval_freq=1, log_dir='runs/val/')
 
     model = Model(horizon=horizon)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
@@ -221,7 +213,7 @@ if __name__ == '__main__':
 
     if not os.path.exists('models/'):
         os.mkdir('models/')
-    optimize(model, loader, train_writer, val_writer, 28,
+    optimize(model, train_loader, train_writer, val_loader, val_writer,
              optimizer, ReduceLROnPlateau(val_writer, optimizer), criterion,
              100, 'models/model.pt')
 

@@ -1,3 +1,5 @@
+import random
+
 import numpy as np
 import pandas as pd
 from torch.utils.data import Dataset, DataLoader
@@ -47,8 +49,15 @@ class ForecastDataset(Dataset):
         self.prices = self._sell_prices(calendar, prices)
         self.sales = self._unit_sales(sales)
 
+        # normalize inputs to unit Gaussian distribution
+        self.day = (self.day - 1.4436644) / 6.093091
+        self.snap = (self.snap - 2.029751) / 3.42601
+        self.prices = (self.prices - 2.029751) / 3.42601
+        self.sales = (self.sales - 2.029751) / 3.42601
+
         self.seq_len = seq_len
         self.horizon = horizon
+        self.start_idx = 0
 
     @staticmethod
     def _weekdays(calendar):
@@ -130,9 +139,50 @@ class ForecastDataset(Dataset):
     def __len__(self):
         """Returns number of items in the dataset."""
         if self.horizon:
-            return len(self.sales) - self.seq_len
+            return (len(self.sales) - 1) // self.seq_len
         else:
-            return len(self.prices) - self.seq_len
+            return len(self.prices) - 1
+
+    def _get_train_item(self, idx):
+        # pick random start index to get different data each epoch
+        if idx == 0:
+            self.start_idx = random.randint(0, self.seq_len - 1)
+
+        # determine index at start and end of sequence
+        idx = idx * self.seq_len + self.start_idx
+        end_idx = min(idx + self.seq_len, len(self.sales) - 1)
+
+        # get data constant per store-item
+        day = self.day[idx + 1:end_idx + 1]
+
+        # stack all data different per store-item
+        items = np.stack((
+            self.snap[idx + 1:end_idx + 1],
+            self.prices[idx + 1:end_idx + 1],
+            self.sales[idx:end_idx]),
+            axis=1
+        )
+
+        # get targets in shape (N, |targets|)
+        targets = self.sales[end_idx:end_idx + self.horizon].T
+
+        return day, items, targets
+
+    def _get_inference_item(self, idx):
+        # get data constant per store-item
+        day = self.day[None, idx + 1]
+
+        # stack only SNAP and prices data; sales has variable length
+        items = np.stack((
+            self.snap[None, idx + 1],
+            self.prices[None, idx + 1]),
+            axis=1
+        )
+
+        # return sales separately, because it may be empty
+        sales = self.sales[idx:idx + 1]
+
+        return day, items, sales
 
     def __getitem__(self, idx):
         """Get data for self.seq_len days and targets for self.horizon days.
@@ -153,58 +203,31 @@ class ForecastDataset(Dataset):
                 snap      = booleans of shape (seq_len, N)
                 prices    = floats of shape (seq_len, N)
                 sales     = integers of shape (seq_len, N)
-            targets = unit sales of next days of shape (N, |targets|), where
-                1 <= |self.sales| - seq_len - idx = |targets| <= horizon
+            targets = unit sales of next days of shape (N, |targets|),
+                where 1 <= |targets| <= horizon
 
-        If horizon = 0, i.e. inference mode, then sales has a variable
-        length, which  means that it needs to be returned separately. So
-        then day, items without sales, and sales separately are returned.
+        If horizon = 0, i.e. inference mode, then sales may be empty, which
+        means that it needs to be returned separately. So then day, items
+        without sales, and sales separately are returned.
 
         Returns [[np.ndarray]*3]:
-            day   = data constant per store-item of shape (seq_len, 32)
-                weekdays  = one-hot vectors of shape (seq_len, 7)
-                weeks     = integers in range [1, 53] of shape (seq_len, 1)
-                monthdays = integers in range [1, 31] of shape (seq_len, 1)
-                months    = one-hot vectors of shape (seq_len, 12)
-                years     = one-hot vectors of shape (seq_len, 6)
-                events    = one-hot vectors of shape (seq_len, 5)
-            items = data different per store-item of shape (seq_len, 2, N)
-                snap      = booleans of shape (seq_len, N)
-                prices    = floats of shape (seq_len, N)
-            sales = unit sales of previous days of shape (|sales|, N), where
-                0 <= |self.sales| - idx = |sales| <= seq_len
+            day   = data constant per store-item of shape (1, 32)
+                weekdays  = one-hot vector of shape (1, 7)
+                weeks     = integer in range [1, 53] of shape (1, 1)
+                monthdays = integer in range [1, 31] of shape (1, 1)
+                months    = one-hot vector of shape (1, 12)
+                years     = one-hot vector of shape (1, 6)
+                events    = one-hot vector of shape (1, 5)
+            items = data different per store-item of shape (1, 2, N)
+                snap      = booleans of shape (1, N)
+                prices    = floats of shape (1, N)
+            sales = unit sales of previous days of shape (|sales|, N),
+                where 0 <= |sales| <= 1
         """
-        # determine index at end of sequence
-        end_idx = idx + self.seq_len
-
-        # get data constant per store-item
-        day = self.day[idx + 1:end_idx + 1]
-
         if self.horizon:  # training or validation mode
-            # stack all data different per store-item
-            items = np.stack((
-                self.snap[idx + 1:end_idx + 1],
-                self.prices[idx + 1:end_idx + 1],
-                self.sales[idx:end_idx]),
-                axis=1
-            )
-
-            # get targets in shape (N, |targets|)
-            targets = self.sales[end_idx:end_idx + self.horizon].T
-
-            return day, items, targets
+            return self._get_train_item(idx)
         else:  # inference mode
-            # stack only SNAP and prices data; sales has variable length
-            items = np.stack((
-                self.snap[idx + 1:end_idx + 1],
-                self.prices[idx + 1:end_idx + 1]),
-                axis=1
-            )
-
-            # return sales separately, because it has a variable length
-            sales = self.sales[idx:end_idx]
-
-            return day, items, sales
+            return self._get_inference_item(idx)
 
 
 if __name__ == '__main__':
@@ -214,7 +237,7 @@ if __name__ == '__main__':
             'in Practice\\Competition 2\\project\\')
     calendar = pd.read_csv(path + 'calendar.csv')
     prices = pd.read_csv(path + 'sell_prices.csv')
-    sales = pd.read_csv(path + 'sales_train_validation.csv')
+    sales = pd.read_csv(path + 'sales_train_validation.csv').iloc[:, :-2]
 
     time = datetime.now()
     dataset = ForecastDataset(calendar, prices, sales, seq_len=8, horizon=5)
@@ -228,7 +251,7 @@ if __name__ == '__main__':
     print('Time to retrieve data: ', datetime.now() - time)
 
     time = datetime.now()
-    dataset = ForecastDataset(calendar, prices, sales, seq_len=8, horizon=0)
+    dataset = ForecastDataset(calendar, prices, sales, seq_len=1, horizon=0)
     print('Time to initialize dataset: ', datetime.now() - time)
 
     loader = DataLoader(dataset)
