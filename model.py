@@ -39,7 +39,7 @@ class Model(nn.Module):
                                                  num_out,
                                                  num_groups,
                                                 independent)
-                                        for num_groups in self.num_groups]
+                                        for num_groups in self.num_groups])
 
         self.device = device
                                        
