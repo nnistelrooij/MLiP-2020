@@ -10,19 +10,23 @@ from mlps import SplitLinear
 from lstms import SplitLSTM
 
 class SubModel(nn.Module):
-    def __init__(self, num_const, num_var, num_hidden, num_out, num_groups):
+    def __init__(self, num_const, num_var, num_hidden, num_out, num_groups, independent):
         super(SubModel, self).__init__()
-        self.lstm = SplitLSTM(num_const, num_var, num_hidden, num_groups, independent=True) # TODO make independent default
-        self.fc = SplitLinear(0, num_hidden, num_out, num_groups) # TODO add independent parameter for consistency
+        self.lstm = SplitLSTM(num_const, num_var, num_hidden, num_groups, independent)
+        self.bn = nn.BatchNorm1d(num_groups)
+        self.fc = SplitLinear(0, num_hidden, num_out, num_groups, independent)
+                    
+    def reset_hidden(self):
+        self.lstm.reset_hidden()
 
     def forward(self, day, items):
         lstm_out, hidden = self.lstm(items, day)
-        lstm_out = lstm_out[-1] # take last day from sequence
+        lstm_out = lstm_out[:, -1] # take last day from sequence
         y = self.fc(lstm_out)
         return y
 
 class Model(nn.Module):
-    def __init__(self, num_const, num_var, num_hidden, num_out, num_groups, num_submodels, device):
+    def __init__(self, num_const, num_var, num_hidden, num_out, num_groups, num_submodels, device, independent=True):
         super(Model, self).__init__()
         num_submodel_groups = math.floor(num_groups / num_submodels)
         num_extra_groups = num_groups % num_submodels
@@ -33,14 +37,20 @@ class Model(nn.Module):
                                                  num_var, 
                                                  num_hidden,
                                                  num_out,
-                                                 num_groups)
-                                        for num_groups in self.num_groups])
+                                                 num_groups,
+                                                independent)
+                                        for num_groups in self.num_groups]
 
         self.device = device
+                                       
+    def reset_hidden(self):
+        for submodel in submodels:
+            submodel.reset_hidden()     
 
     def forward(self, day, items):
         day = day.to(self.device)
         items = items.to(self.device)
+                                       
         y = []
         for i, items in enumerate(items.split(self.num_groups, dim=-1)):
             y_part = self.submodels[i](day, items)
@@ -53,7 +63,7 @@ if __name__ == "__main__":
     num_const = 12  # number of inputs per sub-LSTM that are constant per store-item
     num_var = 3  # number of inputs per sub-LSTM that are different per store-item
     horizon = 5  # number of hidden units per sub-LSTM and output of the entire model (= forecasting horizon)
-    num_groups = 3049  # number of store-item groups
+    num_groups = 3049 # number of store-item groups
     seq_len = 1  # sequence length, number of time points per forward pass
 
     model = Model(num_const, num_var, horizon, horizon, num_groups, 100)
@@ -69,7 +79,7 @@ if __name__ == "__main__":
     time = datetime.now()
     iterations = 2**6
     for _ in tqdm(range(iterations)):
-        output = model(items, day)
+        output = model(day, items)
 
         loss = criterion(output, targets)
 

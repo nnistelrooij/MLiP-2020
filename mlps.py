@@ -9,7 +9,7 @@ import torch.nn.functional as F
 class SplitLinear(nn.Linear):
     """Module for linear layer with independent sub-layers."""
 
-    def __init__(self, num_const, num_var, num_out, num_groups):
+    def __init__(self, num_const, num_var, num_out, num_groups, independent):
         """Initializes split linear layer.
 
         Args:
@@ -23,12 +23,13 @@ class SplitLinear(nn.Linear):
             out_features=num_out * num_groups
         )
 
-        indices = self._weight_indices(num_const, num_var, num_out)
-        self.row_indices, self.col_indices = indices
+        if independent:
+            indices = self._weight_indices(num_const, num_var, num_out)
+            self.row_indices, self.col_indices = indices
 
-        with torch.no_grad():
-            self.weight[self.row_indices, self.col_indices] = 0
-            self.weight.register_hook(self._split_hook)
+            with torch.no_grad():
+                self.weight[self.row_indices, self.col_indices] = 0
+                self.weight.register_hook(self._split_hook)
 
     def _weight_indices(self, num_const, num_var, num_out):
         row_indices = torch.arange(self.out_features).view(-1, 1)
@@ -76,8 +77,8 @@ class SplitMLP(nn.Module):
     def __init__(self, num_const, num_var, num_hidden, num_out, num_groups):
         super(SplitMLP, self).__init__()
 
-        self.fc1 = SplitLinear(num_const, num_var, num_hidden, num_groups)
-        self.fc2 = SplitLinear(0, num_hidden, num_out, num_groups)
+        self.fc1 = SplitLinear(num_const, num_var, num_hidden, num_groups, independent=True)
+        self.fc2 = SplitLinear(0, num_hidden, num_out, num_groups, independent=True)
 
     def forward(self, day, items):
         """Forward pass of split MLP.

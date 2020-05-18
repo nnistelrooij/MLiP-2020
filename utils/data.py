@@ -49,6 +49,12 @@ class ForecastDataset(Dataset):
         self.prices = self._sell_prices(calendar, prices)
         self.sales = self._unit_sales(sales)
 
+        # normalize inputs to unit Gaussian distribution
+        self.day = (self.day - 1.4436644) / 6.093091
+        self.snap = (self.snap - 2.029751) / 3.42601
+        self.prices = (self.prices - 2.029751) / 3.42601
+        self.sales = (self.sales - 2.029751) / 3.42601
+
         self.seq_len = seq_len
         self.horizon = horizon
         self.start_idx = 0
