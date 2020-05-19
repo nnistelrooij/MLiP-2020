@@ -170,19 +170,16 @@ class ForecastDataset(Dataset):
 
     def _get_inference_item(self, idx):
         # get data constant per store-item
-        day = self.day[None, idx + 1]
+        day = self.day[np.newaxis, idx + 1]
 
         # stack only SNAP and prices data; sales has variable length
-        items = np.stack((
-            self.snap[None, idx + 1],
-            self.prices[None, idx + 1]),
-            axis=1
+        items = np.hstack((
+            self.snap[np.newaxis, idx + 1:idx + 2],
+            self.prices[np.newaxis, idx + 1:idx + 2],
+            self.sales[np.newaxis, idx:idx + 1])
         )
 
-        # return sales separately, because it may be empty
-        sales = self.sales[idx:idx + 1]
-
-        return day, items, sales
+        return day, items
 
     def __getitem__(self, idx):
         """Get data for self.seq_len days and targets for self.horizon days.
@@ -207,8 +204,8 @@ class ForecastDataset(Dataset):
                 where 1 <= |targets| <= horizon
 
         If horizon = 0, i.e. inference mode, then sales may be empty, which
-        means that it needs to be returned separately. So then day, items
-        without sales, and sales separately are returned.
+        means that items may not contian sales. So then day and items
+        possibly without sales are returned
 
         Returns [[np.ndarray]*3]:
             day   = data constant per store-item of shape (1, 32)
@@ -218,11 +215,11 @@ class ForecastDataset(Dataset):
                 months    = one-hot vector of shape (1, 12)
                 years     = one-hot vector of shape (1, 6)
                 events    = one-hot vector of shape (1, 5)
-            items = data different per store-item of shape (1, 2, N)
+            items = data different per store-item of shape (1, 2, N) / (1, 3, N)
                 snap      = booleans of shape (1, N)
                 prices    = floats of shape (1, N)
-            sales = unit sales of previous days of shape (|sales|, N),
-                where 0 <= |sales| <= 1
+                sales     = unit sales of previous day of shape (|sales|, N),
+                    where 0 <= |sales| <= 1
         """
         if self.horizon:  # training or validation mode
             return self._get_train_item(idx)

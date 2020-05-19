@@ -19,14 +19,14 @@ class SubModel(nn.Module):
     def reset_hidden(self):
         self.lstm.reset_hidden()
 
-    def forward(self, items, day=torch.tensor([])):
-        lstm_out, _ = self.lstm(items, day)
-        lstm_out = self.bn(lstm_out[:, -1]) # take last day from sequence
+    def forward(self, day, items):
+        lstm_out, hidden = self.lstm(items, day)
+        lstm_out = lstm_out[:, -1] # take last day from sequence
         y = self.fc(lstm_out)
         return y
 
 class Model(nn.Module):
-    def __init__(self, num_const, num_var, num_hidden, num_out, num_groups, num_submodels, independent=True):
+    def __init__(self, num_const, num_var, num_hidden, num_out, num_groups, num_submodels, device, independent=True):
         super(Model, self).__init__()
         num_submodel_groups = math.floor(num_groups / num_submodels)
         num_extra_groups = num_groups % num_submodels
@@ -35,20 +35,25 @@ class Model(nn.Module):
 
         self.submodels = nn.ModuleList([SubModel(num_const, 
                                                  num_var, 
-                                                 num_hidden, 
-                                                 num_out, 
+                                                 num_hidden,
+                                                 num_out,
                                                  num_groups,
-                                                 independent)
+                                                independent)
                                         for num_groups in self.num_groups])
 
+        self.device = device
+                                       
     def reset_hidden(self):
         for submodel in submodels:
-            submodel.reset_hidden()
+            submodel.reset_hidden()     
 
-    def forward(self, items, day):
+    def forward(self, day, items):
+        day = day.to(self.device)
+        items = items.to(self.device)
+                                       
         y = []
-        for i, items in enumerate(items.split(self.num_groups, dim=-2)):
-            y_part = self.submodels[i](items, day)
+        for i, items in enumerate(items.split(self.num_groups, dim=-1)):
+            y_part = self.submodels[i](day, items)
             y.append(y_part)
 
         return torch.cat(y, dim=-2)
@@ -74,7 +79,7 @@ if __name__ == "__main__":
     time = datetime.now()
     iterations = 2**6
     for _ in tqdm(range(iterations)):
-        output = model(items, day)
+        output = model(day, items)
 
         loss = criterion(output, targets)
 
