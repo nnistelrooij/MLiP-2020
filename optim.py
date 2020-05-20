@@ -111,9 +111,10 @@ def validate(model, val_loader, val_writer, criterion, epoch, num_days):
     model.eval()
 
     # start iterator with actual sales from previous day
+    num_days = ForecastDataset.start_idx + num_days
     val_loader = iter(val_loader)
-    day, items, t = None, None, None
-    for _ in range(ForecastDataset.start_idx + num_days + 1):
+    day, items, t = next(val_loader)
+    for _ in range(num_days):
         day, items, t = next(val_loader)
 
     with torch.no_grad():
@@ -122,7 +123,9 @@ def validate(model, val_loader, val_writer, criterion, epoch, num_days):
         sales = y[..., :1]
         targets = t[..., :1]
 
-        for day, items, t in tqdm(val_loader, desc=f'Validation Epoch {epoch}'):
+        val_iter = tqdm(val_loader, desc=f'Validation Epoch {epoch}',
+                        total=len(val_loader) - num_days - 1)
+        for day, items, t in val_iter:
             # replace actual sales in items with projected sales
             items[:, 0, :, 2] = sales[..., -1]
 
