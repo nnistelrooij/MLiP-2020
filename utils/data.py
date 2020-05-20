@@ -198,7 +198,7 @@ class ForecastDataset(Dataset):
                 months    = one-hot vectors of shape (seq_len, 12)
                 years     = one-hot vectors of shape (seq_len, 6)
                 events    = one-hot vectors of shape (seq_len, 5)
-            items   = data different per store-item of shape (seq_len, 3, N)
+            items   = data different per store-item of shape (seq_len, N, 3)
                 snap      = booleans of shape (seq_len, N)
                 prices    = floats of shape (seq_len, N)
                 sales     = integers of shape (seq_len, N)
@@ -217,7 +217,7 @@ class ForecastDataset(Dataset):
                 months    = one-hot vector of shape (1, 12)
                 years     = one-hot vector of shape (1, 6)
                 events    = one-hot vector of shape (1, 5)
-            items = data different per store-item of shape (1, 2, N) / (1, 3, N)
+            items = data different per store-item of shape (1, N, 2) / (1, N, 3)
                 snap      = booleans of shape (1, N)
                 prices    = floats of shape (1, N)
                 sales     = unit sales of previous day of shape (|sales|, N),
