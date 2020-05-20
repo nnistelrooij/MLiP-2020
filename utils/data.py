@@ -1,3 +1,4 @@
+from pathlib import Path
 import random
 
 import numpy as np
@@ -15,7 +16,9 @@ class ForecastDataset(Dataset):
         sales     = [np.ndarray] unit sales of each item at all stores
         seq_len   = [int] sequence length of model input
         horizon   = [int] sequence length of model output, 0 for inference
+        start_idx = [int] random start index to get different data each epoch
     """
+    start_idx = 0
 
     def __init__(self, calendar, prices, sales, seq_len=1, horizon=1):
         """Initializes forecast dataset.
@@ -57,7 +60,6 @@ class ForecastDataset(Dataset):
 
         self.seq_len = seq_len
         self.horizon = horizon
-        self.start_idx = 0
 
     @staticmethod
     def _weekdays(calendar):
@@ -146,7 +148,7 @@ class ForecastDataset(Dataset):
     def _get_train_item(self, idx):
         # pick random start index to get different data each epoch
         if idx == 0:
-            self.start_idx = random.randint(0, self.seq_len - 1)
+            ForecastDataset.start_idx = random.randrange(self.seq_len)
 
         # determine index at start and end of sequence
         idx = idx * self.seq_len + self.start_idx
@@ -227,42 +229,36 @@ class ForecastDataset(Dataset):
             return self._get_inference_item(idx)
 
 
-def data_frames(path, num_days):
+def data_frames(path):
     """Load the data from storage into pd.DataFrame objects.
 
     Args:
         path     = [str] path to folder with competition data
-        num_days = [int] number of days to select
 
     Returns [[pd.DataFrame]*3]:
         calendar = [pd.DataFrame] table with data on each date
         prices   = [pd.DataFrame] sell prices per store-item for each week
         sales    = [pd.DataFrame] unit sales per store-item for each day
     """
+    path = Path(path)
+
     calendar = pd.read_csv(path / 'calendar.csv')
     prices = pd.read_csv(path / 'sell_prices.csv')
     sales = pd.read_csv(path / 'sales_train_validation.csv')
 
-    delta_day = calendar.shape[0] - (sales.shape[1] - 6)
-    start_week = calendar.iloc[-num_days - delta_day]['wm_yr_wk']
-
-    calendar = calendar.iloc[-num_days - delta_day:]
-
-    prices = prices[prices['wm_yr_wk'] >= start_week]
-
-    sales = sales.filter(like='id'), sales.iloc[:, -num_days:]
-    sales = pd.concat(sales, axis=1)
-
     return calendar, prices, sales
 
 
-def data_loaders(calendar, prices, sales, num_val_days, seq_len, horizon):
+def data_loaders(calendar, prices, sales,
+                 num_days, num_val_days,
+                 seq_len, horizon):
     """Load the training and validation DataLoader objects.
 
     Args:
         calendar     = [pd.DataFrame] table with data on each date
         prices       = [pd.DataFrame] sell prices per store-item for each week
         sales        = [pd.DataFrame] unit sales per store-item for each day
+        num_days     = [int] number of days for training and validation
         num_val_days = [int] number of days to use for validation data
         seq_len      = [int] sequence length of model input
         horizon      = [int] sequence length of model output, 0 for inference
@@ -271,14 +267,23 @@ def data_loaders(calendar, prices, sales, num_val_days, seq_len, horizon):
         train_loader = train DataLoader object
         val_loader   = validation DataLoader object
     """
-    train_sales = sales.iloc[:, :-num_val_days]
-    train_dataset = ForecastDataset(
-        calendar, prices, train_sales, seq_len, horizon
-    )
-    val_dataset = ForecastDataset(calendar, prices, sales)
+    # get last num_days days of data plus the extra days
+    num_extra_days = calendar.shape[0] - (sales.shape[1] - 6)
+    calendar = calendar.iloc[-num_days - num_extra_days:]
 
-    train_loader = DataLoader(train_dataset)
-    val_loader = DataLoader(val_dataset)
+    # get last num_days days of sales data
+    sales = pd.concat((sales.iloc[:, :6], sales.iloc[:, -num_days:]), axis=1)
+
+    # make DataLoader with only training days
+    train_sales = sales.iloc[:, :-num_val_days]
+    train_loader = DataLoader(ForecastDataset(
+         calendar, prices, train_sales, seq_len, horizon
+    ))
+
+    # make DataLoader with all num_days days
+    val_loader = DataLoader(ForecastDataset(
+        calendar, prices, sales
+    ))
 
     return train_loader, val_loader
 

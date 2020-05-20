@@ -3,6 +3,8 @@ import math
 import torch
 from tqdm import tqdm
 
+from utils.data import ForecastDataset
+
 
 class ReduceLROnPlateau(object):
     """Reduce learning rate when loss has stopped improving.
@@ -110,25 +112,25 @@ def validate(model, val_loader, val_writer, criterion, epoch, num_days):
 
     # start iterator with actual sales from previous day
     val_loader = iter(val_loader)
-    day, items, t = next(val_loader)
-    for _ in range(num_days - 1):
+    day, items, t = None, None, None
+    for _ in range(ForecastDataset.start_idx + num_days + 1):
         day, items, t = next(val_loader)
 
     with torch.no_grad():
         # initialize sales and targets columns for current day
         y = model(day, items)
-        sales = y[:, :1]
+        sales = y[..., :1]
         targets = t[..., :1]
 
         for day, items, t in tqdm(val_loader, desc=f'Validation Epoch {epoch}'):
             # replace actual sales in items with projected sales
-            items[0, 0, 2] = sales[:, -1]
+            items[:, 0, :, 2] = sales[..., -1]
 
             # predict with sales projections from previous days
             y = model(day, items)
 
             # add sales projections and targets to tables
-            sales = torch.cat((sales, y[:, :1]), dim=1)
+            sales = torch.cat((sales, y[..., :1]), dim=2)
             targets = torch.cat((targets, t[..., :1]), dim=2)
 
     # compute loss over whole horizon and show on TensorBoard

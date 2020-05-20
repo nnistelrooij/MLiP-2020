@@ -1,6 +1,5 @@
 import argparse
 from datetime import datetime
-from pathlib import Path
 
 import torch
 
@@ -28,8 +27,8 @@ def handle_arguments():
                         help='switch to have inter-group dependencies')
     parser.add_argument('-e', '--epochs', type=int, default=50, help='number '
                         'of iterations over training data, default: 50')
-    parser.add_argument('-m', '--model', type=str, default='model.pt',
-                        help='path to save trained model, default: "model.pt"')
+    parser.add_argument('-m', '--model', type=str, default='models/model.pt',
+                        help='path to save model, default: "models/model.pt"')
 
     # parse and print arguments
     args = parser.parse_args()
@@ -44,11 +43,13 @@ if __name__ == '__main__':
     args = handle_arguments()
 
     # load Pandas DataFrames
-    calendar, prices, sales = data_frames(Path(args.path), args.num_days)
+    calendar, prices, sales = data_frames(args.path)
 
     # get DataLoaders
     train_loader, val_loader = data_loaders(
-        calendar, prices, sales, args.num_val_days, args.seq_len, args.horizon
+        calendar, prices, sales,
+        args.num_days, args.num_val_days,
+        args.seq_len, args.horizon
     )
 
     # use GPU if available
@@ -61,7 +62,6 @@ if __name__ == '__main__':
     # TensorBoard writers
     current_time = datetime.now().strftime("%Y-%m-%d/%H'%M'%S")
     train_writer = MetricWriter(f'runs/{current_time}/train')
-    # train_writer.add_graph(model, next(iter(train_loader))[:2])  # show model
     val_writer = MetricWriter(f'runs/{current_time}/validation', eval_freq=1)
 
     # initialize optimizer, scheduler, and criterion
