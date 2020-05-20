@@ -2,27 +2,33 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+from torchsummary import summary
+
+num_const = 32
+num_var = 3
+num_hidden = 5
+num_groups = 30490
 
 
 class WRMSSE(nn.Module):
-    """Weighted Root Mean Squared Scaled Error used for loss module.
+    """Weighted Root Mean Squared Scaled Error as loss module.
 
     Attributes:
         device        = [torch.device] device to compute loss on
-        permutations  = [[np.ndarray]*12] sales permutation for each group
-        group_indices = [[np.ndarray]*12] end indices for each group
+        permutations  = [[np.ndarray]*12] sales permutations for each level
+        group_indices = [[np.ndarray]*12] end indices of each group and level
         scales        = [torch.Tensor] pre-computed scales used in the WRMSSE
         weights       = [torch.Tensor] pre-computed weights used in the WRMSSE
     """
 
-    def __init__(self, device, calendar, prices, sales):
+    def __init__(self, calendar, prices, sales, device):
         """Initializes WRMSSE loss module.
 
         Args:
-            device   = [torch.device] device to compute the loss on
             calendar = [pd.DataFrame] table with data on each date
             prices   = [pd.DataFrame] table with average sell prices each week
             sales    = [pd.DataFrame] table with sales per item for each day
+            device   = [torch.device] device to compute the loss on
         """
         super(WRMSSE, self).__init__()
 
@@ -65,6 +71,9 @@ class WRMSSE(nn.Module):
             calendar = [pd.DataFrame] table with data on each date
             prices   = [pd.DataFrame] table with average sell prices each week
             sales    = [pd.DataFrame] table with sales per item for each day
+
+        Returns [torch.Tensor]:
+            Weight of each time series.
         """
         # select only necessary columns
         calendar = calendar[['wm_yr_wk', 'd']]
@@ -103,11 +112,11 @@ class WRMSSE(nn.Module):
         """Computes permutation and end indices of each group in input.
 
         Args:
-            df = [pd.DataFrame] DataFrame with WRMSSE._id_columns columns
+            df = [pd.DataFrame] DataFrame with columns like *_id
 
         Returns:
-            permutations  = [[np.ndarray]*12] sales permutation for each group
-            group_indices = [[np.ndarray]*12] end indices for each group
+            permutations  = [[np.ndarray]*12] sales permutation for each level
+            group_indices = [[np.ndarray]*12] end indices of each group & level
         """
         # add total column for highest level of hierarchy
         df['total'] = 'TOTAL'
@@ -163,8 +172,8 @@ class WRMSSE(nn.Module):
         """Computes the WRMSSE loss.
 
         Args:
-            input  = [torch.Tensor] projected unit sales with shape (N, h)
-            target = [torch.Tensor] actual unit sales with shape (N, h)
+            input  = [torch.Tensor] projected unit sales with shape (1, N, h)
+            target = [torch.Tensor] actual unit sales with shape (1, N, h)
 
         Returns [torch.Tensor]:
             Tensor with a single value for the loss.
@@ -173,7 +182,7 @@ class WRMSSE(nn.Module):
         horizon = target.shape[2]
 
         # select correct columns and aggregate to all levels of the hierarchy
-        input = input[:, :horizon]
+        input = input.squeeze(0)[:, :horizon]
         projected_sales = self._aggregate(
             input, self.permutations, self.group_indices
         )
@@ -191,6 +200,332 @@ class WRMSSE(nn.Module):
         loss = torch.sum(self.weights * RMSSE)
 
         return loss
+
+
+class SplitLinear(nn.Module):
+    """Module for fully-connected layer with independent sub-layers.
+
+    Attributes:
+        linear     = [nn.Linear] linear layer as basis
+        weight_idx = [[torch.Tensor]*2] weight index arrays
+    """
+
+    def __init__(self, num_out, num_groups, independent):
+        """Initializes linear layer with or without independent sub-layers.
+
+        Args:
+            num_out     = [int] number of output units per store-item group
+            num_groups  = [int] number of store-item groups to make submodel for
+            independent = [bool] whether the submodel has independent groups
+        """
+        super(SplitLinear, self).__init__()
+
+        input_size = num_hidden * num_groups
+        output_size = num_out * num_groups
+        self.linear = nn.Linear(input_size, output_size)
+
+        self.weight_idx = self._weight_indices(num_out, input_size, output_size)
+        if independent:
+            with torch.no_grad():
+                self.linear.weight[self.weight_idx] = 0
+                self.linear.weight.register_hook(self._split_hook)
+
+    @staticmethod
+    def _weight_indices(num_out, input_size, output_size):
+        """Compute inter-group weight index array for group independence.
+
+        Args:
+            num_out     = [int] number of output units per store-item group
+            input_size  = [int] total number of input units
+            output_size = [int] total number of output units
+
+        Returns [[torch.Tensor]*2]:
+            Weight index array for easily setting weights to zero.
+        """
+        global num_hidden
+
+        row_indices = torch.arange(output_size).view(-1, 1)
+
+        col_indices = []
+        for i in range(0, input_size, num_hidden):
+            col_index = torch.cat((
+                torch.arange(0, i),
+                torch.arange(i + num_hidden, input_size)
+            ))
+            col_indices.append(col_index)
+        col_indices = torch.stack(col_indices)
+        col_indices = col_indices.repeat_interleave(num_out, dim=0)
+
+        return row_indices, col_indices
+
+    def _split_hook(self, grad):
+        """Backward hook to zero gradients."""
+        grad = grad.clone()
+        grad[self.weight_idx] = 0
+
+        return grad
+
+    def forward(self, input):
+        """Forward pass of the split linear layer.
+
+        Args:
+            input = [torch.Tensor] input of shape (1, num_groups * num_hidden)
+
+        Returns:
+            Output of shape (1, num_groups * num_out).
+        """
+        y = self.linear(input)
+
+        return y
+
+
+class SplitLSTM(nn.Module):
+    """Module for LSTM with independent sub-layers.
+
+    Attributes:
+        lstm          = [nn.LSTM] LSTM model as basis
+        hidden        = [[torch.Tensor]*2] last hidden and cell states of LSTM
+        ih_weight_idx = [[torch.Tensor]*2] input-hidden weight index arrays
+        hh_weight_idx = [[torch.Tensor]*2] hidden-hidden weight index arrays
+    """
+
+    def __init__(self, num_groups, independent):
+        """Initializes LSTM with or without independent sub-layers.
+
+        Args:
+            num_groups  = [int] number of store-item groups to make LSTM for
+            independent = [bool] whether the LSTM has independent sub-layers
+        """
+        super(SplitLSTM, self).__init__()
+
+        global num_const
+        global num_var
+        global num_hidden
+
+        # initialize LSTM and hidden state of LSTM
+        input_size = num_const + num_var * num_groups
+        hidden_size = num_hidden * num_groups
+        self.lstm = nn.LSTM(input_size, hidden_size, batch_first=True)
+        self.hidden = None
+
+        # compute index array for easy and fast indexing
+        weight_indices = self._weight_indices(input_size, hidden_size)
+        self.ih_weight_idx, self.hh_weight_idx = weight_indices
+        if independent:
+            with torch.no_grad():
+                # set weights to zero
+                self.lstm.weight_ih_l0[self.ih_weight_idx] = 0
+                self.lstm.weight_hh_l0[self.hh_weight_idx] = 0
+
+                # register hooks to set gradient to zero
+                self.lstm.weight_ih_l0.register_hook(self._ih_split_hook)
+                self.lstm.weight_hh_l0.register_hook(self._hh_split_hook)
+
+    def reset_hidden(self):
+        """Reset hidden of state of LSTM."""
+        self.hidden = None
+
+    @staticmethod
+    def _weight_indices(input_size, hidden_size):
+        """Compute inter-group weight index arrays for group independence.
+
+        Args:
+            input_size  = [int] total number of input units
+            hidden_size = [int] total number of hidden units
+
+        Returns [[[torch.Tensor]*2]*2]:
+            Weight index arrays for easily setting weights to zero.
+        """
+        global num_const
+        global num_var
+        global num_hidden
+
+        row_indices = torch.arange(hidden_size * 4).view(-1, 1)
+
+        ih_col_indices = []
+        for i in range(num_const, input_size, num_var):
+            ih_col_index = torch.cat((
+                torch.arange(num_const, i),
+                torch.arange(i + num_var, input_size)
+            ))
+            ih_col_indices.append(ih_col_index)
+        ih_col_indices = torch.stack(ih_col_indices)
+        ih_col_indices = ih_col_indices.repeat_interleave(num_hidden, dim=0)
+        ih_col_indices = ih_col_indices.repeat(4, 1)
+
+        hh_col_indices = []
+        for i in range(0, hidden_size, num_hidden):
+            hh_col_index = torch.cat((
+                torch.arange(0, i),
+                torch.arange(i + num_hidden, hidden_size)
+            ))
+            hh_col_indices.append(hh_col_index)
+        hh_col_indices = torch.stack(hh_col_indices)
+        hh_col_indices = hh_col_indices.repeat_interleave(num_hidden, dim=0)
+        hh_col_indices = hh_col_indices.repeat(4, 1)
+
+        ih_weight_indices = row_indices, ih_col_indices
+        hh_weight_indices = row_indices, hh_col_indices
+        return ih_weight_indices, hh_weight_indices
+
+    def _ih_split_hook(self, grad):
+        """Backward hook to zero input-hidden gradients."""
+        grad = grad.clone()
+        grad[self.ih_weight_idx] = 0
+
+        return grad
+
+    def _hh_split_hook(self, grad):
+        """Backward hook to zero hidden-hidden gradients."""
+        grad = grad.clone()
+        grad[self.hh_weight_idx] = 0
+
+        return grad
+
+    def _detach_hidden(self):
+        """Detach hidden state from computational graph for next iteration."""
+        h_n, c_n = self.hidden
+        self.hidden = h_n.detach(), c_n.detach()
+
+    def forward(self, input):
+        """Forward pass of the split LSTM.
+
+        Args:
+            input = [torch.Tensor] input of shape
+                (1, seq_len, num_const + num_groups * num_var)
+
+        Returns [torch.Tensor]:
+            Output of shape (1, seq_len, num_groups * num_hidden).
+        """
+        # run the LSTM on the inputs
+        y, self.hidden = self.lstm(input, self.hidden)
+
+        # detach hidden state for next iterations
+        self._detach_hidden()
+
+        return y
+
+
+class SubModel(nn.Module):
+    """Class that implements LSTM network for subset of all store-item groups.
+
+    Attributes:
+        lstm       = [SplitLSTM] LSTM part of the submodel
+        fc         = [SplitLinear] fully-connected part of the submodel
+        num_groups = [int] number of groups this submodel will process
+    """
+
+    def __init__(self, num_out, num_groups, independent):
+        """Initializes the submodel.
+
+        Args:
+            num_out     = [int] number of output units per store-item group
+            num_groups  = [int] number of store-item groups to make submodel for
+            independent = [bool] whether the submodel has independent groups
+        """
+        super(SubModel, self).__init__()
+
+        self.num_groups = num_groups
+        self.lstm = SplitLSTM(self.num_groups, independent)
+        self.fc = SplitLinear(num_out, self.num_groups, independent)
+
+    def reset_hidden(self):
+        """Resets the hidden state of the LSTM."""
+        self.lstm.reset_hidden()
+
+    def forward(self, day, items):
+        """Forward pass of the submodel.
+
+        Args:
+            day   = [torch.Tensor] inputs constant per store-item group
+                The shape should be (1, seq_len, num_const).
+            items = [torch.Tensor] inputs different per store-item group
+                The shape should be (1, seq_len, num_groups, num_var).
+
+        Returns [torch.Tensor]:
+            Output of shape (1, num_groups, num_out)
+        """
+        # put inputs in one tensor
+        x = torch.cat((day, items.flatten(start_dim=-2)), dim=-1)
+
+        # run LSTM on input
+        lstm_out = self.lstm(x)
+
+        # run linear layer on last output of LSTM
+        lstm_out = lstm_out[:, -1]  # take last day from sequence
+        y = self.fc(lstm_out)
+
+        # add the group dimension back
+        y = y.view(items.shape[0], self.num_groups, -1)
+
+        return y
+
+
+class Model(nn.Module):
+    """Class that implements LSTM networks for all store-item groups.
+
+    Attributes:
+        num_model_groups = [[int]*num_models] number of groups of each submodel
+        submodels        = [nn.ModuleList] list of submodels
+        device           = [torch.device] device to put the model and data on
+    """
+
+    def __init__(self, num_out, num_models, device, independent=True):
+        """Initializes the model.
+
+        Args:
+            num_out     = [int] number of output units per store-item group
+            num_models  = [int] number of submodels to make
+            device      = [torch.device] device to put the model and data on
+            independent = [bool] whether each submodel has independent groups
+        """
+        super(Model, self).__init__()
+
+        global num_groups
+
+        min_model_groups = num_groups // num_models
+        num_extra_groups = num_groups % num_models
+        self.num_model_groups = torch.full((num_models,), min_model_groups)
+        self.num_model_groups[:num_extra_groups] = min_model_groups + 1
+        self.num_model_groups = self.num_model_groups.long().tolist()
+
+        self.submodels = nn.ModuleList()
+        for num_model_groups in self.num_model_groups:
+            submodel = SubModel(num_out, num_model_groups, independent)
+            submodel = submodel.to(device)
+            self.submodels.append(submodel)
+
+        self.device = device
+
+    def reset_hidden(self):
+        """Resets the hidden states of all submodels."""
+        for submodel in self.submodels:
+            submodel.reset_hidden()
+
+    def forward(self, day, items):
+        """Forward pass of the model.
+
+        `items` is split, such that each submodel receives the correct number
+        of inputs. Each submodel is run in order without concurrency.
+
+        Args:
+            day   = [torch.Tensor] inputs constant per store-item group
+                The shape should be (1, seq_len, num_const).
+            items = [torch.Tensor] inputs different per store-item group
+                The shape should be (1, seq_len, num_var, num_groups).
+
+        Returns [torch.Tensor]:
+            Output of shape (1, seq_len, num_groups, num_out)
+        """
+        day = day.to(self.device)
+        items = items.to(self.device)
+
+        y = []
+        for i, items in enumerate(items.split(self.num_model_groups, dim=-2)):
+            submodel = self.submodels[i]
+            y.append(submodel(day, items))
+
+        return torch.cat(y, dim=-2)
 
 
 if __name__ == '__main__':

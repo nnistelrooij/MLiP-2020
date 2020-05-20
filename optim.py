@@ -3,12 +3,14 @@ import math
 import torch
 from tqdm import tqdm
 
+from utils.data import ForecastDataset
+
 
 class ReduceLROnPlateau(object):
     """Reduce learning rate when loss has stopped improving.
 
     Attributes:
-        writer         = [TensorBoardWriter] TensorBoard writer of learning rate
+        writer         = [MetricWriter] TensorBoard writer of learning rate
         optimizer      = [Optimizer] optimizer containing the learning rate
         factor         = [float] factor by which the learning rate is reduced
         patience       = [int] number of epochs with no improvement after
@@ -17,11 +19,11 @@ class ReduceLROnPlateau(object):
         num_bad_epochs = [int] number of consecutive epochs with a worse loss
     """
 
-    def __init__(self, writer, optimizer, factor=0.1, patience=5):
+    def __init__(self, writer, optimizer, factor=0.1, patience=10):
         """Initialize the learning rate scheduler.
 
         Args:
-            writer    = [TensorBoardWriter] TensorBoard writer of learning rate
+            writer    = [MetricWriter] TensorBoard writer of learning rate
             optimizer = [Optimizer] optimizer containing the learning rate
             factor    = [float] factor by which the learning rate is reduced
             patience  = [int] number of epochs with no improvement after
@@ -63,16 +65,20 @@ def train(model, train_loader, train_writer, optimizer, criterion, epoch):
     Args:
         model        = [nn.Module] model to train with train data set
         train_loader = [DataLoader] train data loader
-        train_writer = [TensorBoardWriter] TensorBoard writer of train loss
+        train_writer = [MetricWriter] TensorBoard writer of train loss
         optimizer    = [Optimizer] optimizer to update the model
         criterion    = [nn.Module] neural network module to compute loss
         epoch        = [int] current iteration over the training data set
+
+    Returns [int]:
+        Number of days the model has been trained on in current epoch.
     """
+    num_days = 0
     for day, items, t in tqdm(train_loader, desc=f'Train Epoch {epoch}'):
-        # predict
+        # predict sales projections
         y = model(day, items)
 
-        # compute loss and show on TensorBoard every 100 days
+        # compute loss and show on TensorBoard every 100 iterations
         loss = criterion(y, t)
         train_writer.show_loss(loss, day.shape[1])
 
@@ -81,16 +87,22 @@ def train(model, train_loader, train_writer, optimizer, criterion, epoch):
         loss.backward()
         optimizer.step()
 
+        # bookkeeping
+        num_days += day.shape[1]
 
-def validate(model, val_loader, val_writer, criterion, epoch):
+    return num_days
+
+
+def validate(model, val_loader, val_writer, criterion, epoch, num_days):
     """Computes loss of current model on validation data.
 
     Args:
         model      = [nn.Module] model to test with validation data set
         val_loader = [DataLoader] validation data loader
-        val_writer = [TensorBoardWriter] TensorBoard writer of validation loss
+        val_writer = [MetricWriter] TensorBoard writer of validation loss
         criterion  = [nn.Module] neural network module to compute loss
         epoch      = [int] current iteration over the training data set
+        num_days   = [int] number of days model has seen in current epoch
 
     Returns [torch.Tensor]:
         Validation loss over one epoch.
@@ -100,23 +112,25 @@ def validate(model, val_loader, val_writer, criterion, epoch):
 
     # start iterator with actual sales from previous day
     val_loader = iter(val_loader)
-    day, items, t = next(val_loader)
+    day, items, t = None, None, None
+    for _ in range(ForecastDataset.start_idx + num_days + 1):
+        day, items, t = next(val_loader)
 
     with torch.no_grad():
         # initialize sales and targets columns for current day
         y = model(day, items)
-        sales = y[:, :1]
+        sales = y[..., :1]
         targets = t[..., :1]
 
         for day, items, t in tqdm(val_loader, desc=f'Validation Epoch {epoch}'):
             # replace actual sales in items with projected sales
-            items[0, 0, 2] = sales[:, -1]
+            items[:, 0, :, 2] = sales[..., -1]
 
             # predict with sales projections from previous days
             y = model(day, items)
 
             # add sales projections and targets to tables
-            sales = torch.cat((sales, y[:, :1]), dim=1)
+            sales = torch.cat((sales, y[..., :1]), dim=2)
             targets = torch.cat((targets, t[..., :1]), dim=2)
 
     # compute loss over whole horizon and show on TensorBoard
@@ -155,10 +169,14 @@ def optimize(model,
         model.reset_hidden()
         
         # update model weights given losses on train data
-        train(model, train_loader, train_writer, optimizer, criterion, epoch)
+        num_days = train(
+            model, train_loader, train_writer, optimizer, criterion, epoch
+        )
 
         # determine score on validation data
-        val_score = validate(model, val_loader, val_writer, criterion, epoch)
+        val_score = validate(
+            model, val_loader, val_writer, criterion, epoch, num_days
+        )
 
         # update learning rate given validation score
         scheduler.step(val_score)
@@ -176,7 +194,7 @@ if __name__ == '__main__':
 
     from nn import WRMSSE
     from utils.data import ForecastDataset
-    from utils.tensorboard import TensorBoardWriter
+    from utils.tensorboard import MetricWriter
 
     class Model(nn.Module):
         def __init__(self, num_groups=30490, horizon=5):
@@ -207,8 +225,8 @@ if __name__ == '__main__':
     val_dataset = ForecastDataset(calendar, prices, val_sales)
     val_loader = DataLoader(val_dataset)
 
-    train_writer = TensorBoardWriter(log_dir='runs/train/')
-    val_writer = TensorBoardWriter(eval_freq=1, log_dir='runs/val/')
+    train_writer = MetricWriter(log_dir='runs/train/')
+    val_writer = MetricWriter(eval_freq=1, log_dir='runs/val/')
 
     model = Model(horizon=horizon)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
