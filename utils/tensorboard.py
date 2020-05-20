@@ -2,7 +2,7 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 
 
-class TensorBoardWriter(SummaryWriter):
+class MetricWriter(SummaryWriter):
     """Class to show losses and learning rates on TensorBoard.
 
     Attributes:
@@ -13,14 +13,14 @@ class TensorBoardWriter(SummaryWriter):
     """
     num_days = 0
 
-    def __init__(self, eval_freq=100, log_dir=None):
+    def __init__(self, log_dir, eval_freq=100):
         """Initialize this class as subclass of SummaryWriter.
 
         Args:
-            eval_freq = [int] number of days before the next TensorBoard update
             log_dir   = [str] directory to store the run data file
+            eval_freq = [int] number of days before the next TensorBoard update
         """
-        super(TensorBoardWriter, self).__init__(log_dir)
+        super(MetricWriter, self).__init__(log_dir)
 
         self.num_batches = 0
         self.eval_freq = eval_freq
@@ -34,7 +34,7 @@ class TensorBoardWriter(SummaryWriter):
             num_days = [int] number of training days in current batch
         """
         # increase day and batch counters
-        TensorBoardWriter.num_days += num_days
+        MetricWriter.num_days += num_days
         self.num_batches += 1
 
         # update running loss
@@ -44,7 +44,7 @@ class TensorBoardWriter(SummaryWriter):
         if self.num_batches % self.eval_freq == 0:
             # show loss on TensorBoard
             loss = self.running_loss / self.eval_freq
-            self.add_scalar('loss', loss, TensorBoardWriter.num_days)
+            self.add_scalar('loss', loss, MetricWriter.num_days)
 
             # reset running loss
             self.running_loss *= 0
@@ -55,4 +55,4 @@ class TensorBoardWriter(SummaryWriter):
         Args:
             lr = [float] learning rate on the current epoch
         """
-        self.add_scalar('learning rate', lr, TensorBoardWriter.num_days)
+        self.add_scalar('learning rate', lr, MetricWriter.num_days)

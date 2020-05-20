@@ -160,7 +160,7 @@ class ForecastDataset(Dataset):
             self.snap[idx + 1:end_idx + 1],
             self.prices[idx + 1:end_idx + 1],
             self.sales[idx:end_idx]),
-            axis=1
+            axis=2
         )
 
         # get targets in shape (N, |targets|)
@@ -174,10 +174,10 @@ class ForecastDataset(Dataset):
 
         # stack only SNAP and prices data; sales has variable length
         items = np.hstack((
-            self.snap[np.newaxis, idx + 1:idx + 2],
-            self.prices[np.newaxis, idx + 1:idx + 2],
-            self.sales[np.newaxis, idx:idx + 1])
-        )
+            self.snap[idx + 1:idx + 2].T,
+            self.prices[idx + 1:idx + 2].T,
+            self.sales[idx:idx + 1].T)
+        )[np.newaxis]
 
         return day, items
 
@@ -227,14 +227,74 @@ class ForecastDataset(Dataset):
             return self._get_inference_item(idx)
 
 
+def data_frames(path, num_days):
+    """Load the data from storage into pd.DataFrame objects.
+
+    Args:
+        path     = [str] path to folder with competition data
+        num_days = [int] number of days to select
+
+    Returns [[pd.DataFrame]*3]:
+        calendar = [pd.DataFrame] table with data on each date
+        prices   = [pd.DataFrame] sell prices per store-item for each week
+        sales    = [pd.DataFrame] unit sales per store-item for each day
+    """
+    calendar = pd.read_csv(path / 'calendar.csv')
+    prices = pd.read_csv(path / 'sell_prices.csv')
+    sales = pd.read_csv(path / 'sales_train_validation.csv')
+
+    delta_day = calendar.shape[0] - (sales.shape[1] - 6)
+    start_week = calendar.iloc[-num_days - delta_day]['wm_yr_wk']
+
+    calendar = calendar.iloc[-num_days - delta_day:]
+
+    prices = prices[prices['wm_yr_wk'] >= start_week]
+
+    sales = sales.filter(like='id'), sales.iloc[:, -num_days:]
+    sales = pd.concat(sales, axis=1)
+
+    return calendar, prices, sales
+
+
+def data_loaders(calendar, prices, sales, num_val_days, seq_len, horizon):
+    """Load the training and validation DataLoader objects.
+
+    Args:
+        calendar     = [pd.DataFrame] table with data on each date
+        prices       = [pd.DataFrame] sell prices per store-item for each week
+        sales        = [pd.DataFrame] unit sales per store-item for each day
+        num_val_days = [int] number of days to use for validation data
+        seq_len      = [int] sequence length of model input
+        horizon      = [int] sequence length of model output, 0 for inference
+
+    Returns [[DataLoader]*2]:
+        train_loader = train DataLoader object
+        val_loader   = validation DataLoader object
+    """
+    train_sales = sales.iloc[:, :-num_val_days]
+    train_dataset = ForecastDataset(
+        calendar, prices, train_sales, seq_len, horizon
+    )
+    val_dataset = ForecastDataset(calendar, prices, sales)
+
+    train_loader = DataLoader(train_dataset)
+    val_loader = DataLoader(val_dataset)
+
+    return train_loader, val_loader
+
+
 if __name__ == '__main__':
     from datetime import datetime
 
     path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning '
             'in Practice\\Competition 2\\project\\')
-    calendar = pd.read_csv(path + 'calendar.csv')
-    prices = pd.read_csv(path + 'sell_prices.csv')
-    sales = pd.read_csv(path + 'sales_train_validation.csv').iloc[:, :-2]
+    calendar, prices, sales = load_data(path, -365)
+
+    # train_loader, val_loader = data_loaders(calendar, prices, sales, 28, 8, 5)
+
+    # calendar = pd.read_csv(path + 'calendar.csv')
+    # prices = pd.read_csv(path + 'sell_prices.csv')
+    # sales = pd.read_csv(path + 'sales_train_validation.csv').iloc[:, :-2]
 
     time = datetime.now()
     dataset = ForecastDataset(calendar, prices, sales, seq_len=8, horizon=5)
