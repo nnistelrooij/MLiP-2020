@@ -4,7 +4,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from utils.data import ForecastDataset
-from model import Model
+from nn import Model
 
 
 def infer(model, loader):
@@ -26,21 +26,21 @@ def infer(model, loader):
 
         y = model(day, items)
         projections.append(y[:, 0])
+        
+    validation = torch.stack(projections[-56:-28], dim=1)
+    evaluation = torch.stack(projections[-28:], dim=1)
 
-    return torch.stack(projections[-56:-28], dim=1), torch.stack(projections[-28:], dim=1)
+    return validation, evaluation
 
 
 if __name__ == '__main__':
     device = torch.device('cuda')
-    num_const = 32  # number of inputs per sub-LSTM that are constant per store-item
-    num_var = 3  # number of inputs per sub-LSTM that are different per store-item
-    horizon = 5  # number of hidden units per sub-LSTM and output of the entire model (= forecasting horizon)
-    num_groups = 30490  # number of store-item groups
+    horizon = 5  # forecasting horizon
+    num_models = 1000
 
-    model = Model(num_const, num_var, horizon, horizon, num_groups, 1000, device)
-    model.to(device)
+    model = Model(horizon, num_models, device, True)
+    # model.load_state_dict(torch.load('models/model.pt', map_location=device))
     model.eval()
-    # model.load_state_dict(torch.load('model.pt', map_location=device))
 
     path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning '
             'in Practice\\Competition 2\\project\\')
