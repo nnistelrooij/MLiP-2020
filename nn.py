@@ -196,7 +196,7 @@ class WRMSSE(nn.Module):
         # compute WRMSSE loss
         squared_errors = (actual_sales - projected_sales)**2
         MSE = torch.sum(squared_errors, dim=1) / horizon
-        RMSSE = torch.sqrt(MSE / self.scales)
+        RMSSE = torch.sqrt(MSE / self.scales + 1e-18)
         loss = torch.sum(self.weights * RMSSE)
 
         return loss
