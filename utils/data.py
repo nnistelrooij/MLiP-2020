@@ -163,10 +163,19 @@ class ForecastDataset(Dataset):
         day = (day - 1.4436644) / 6.093091
         items = (items - 2.029751) / 3.42601
 
-        # get targets in shape (N, |targets|)
-        targets = self.sales[end_idx:end_idx + self.horizon].T
+        # get data constant per store-item
+        targets_end_idx = min(end_idx + self.horizon, len(self.sales))
+        targets_day = self.day[end_idx + 1:targets_end_idx + 1]
 
-        return day, items, targets
+        # stack all data different per store-item
+        targets_items = np.stack((
+            self.snap[end_idx + 1:targets_end_idx + 1],
+            self.prices[end_idx + 1:targets_end_idx + 1],
+            self.sales[end_idx:targets_end_idx]),
+            axis=2
+        )
+
+        return day, items, targets_day, targets_items
 
     def _get_inference_item(self, idx):
         # get data constant per store-item
@@ -295,7 +304,7 @@ if __name__ == '__main__':
 
     path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning '
             'in Practice\\Competition 2\\project\\')
-    calendar, prices, sales = load_data(path, -365)
+    calendar, prices, sales = data_frames(path)
 
     # train_loader, val_loader = data_loaders(calendar, prices, sales, 28, 8, 5)
 
@@ -309,8 +318,9 @@ if __name__ == '__main__':
 
     loader = DataLoader(dataset)
     time = datetime.now()
-    for day, items, targets in loader:
-        print('training: ', day.shape[1], items.shape[1], targets.shape[2])
+    for day, items, targets_day, targets_items in loader:
+        print('training: ', day.shape[1], items.shape[1],
+              targets_day.shape[1], targets_items.shape[1])
         pass
     print('Time to retrieve data: ', datetime.now() - time)
 
