@@ -78,10 +78,10 @@ def train(model, train_loader, train_writer, optimizer, criterion, epoch):
         day, items, t_day, t_items = data
 
         # predict sales projections
-        y = model(day, items, t_day, t_items)
+        y = model(day, items, t_day[:, :-1], t_items[:, :-1])
 
         # compute loss and show on TensorBoard every 100 iterations
-        loss = criterion(y, t)
+        loss = criterion(y, t_items[:, 1:, :, 2].permute(0, 2, 1))
         train_writer.show_loss(loss, day.shape[1])
 
         # update model's parameters

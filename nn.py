@@ -210,32 +210,30 @@ class SplitLinear(nn.Module):
         weight_idx = [[torch.Tensor]*2] weight index arrays
     """
 
-    def __init__(self, num_out, num_groups, independent):
+    def __init__(self, num_groups, independent):
         """Initializes linear layer with or without independent sub-layers.
 
         Args:
-            num_out     = [int] number of output units per store-item group
             num_groups  = [int] number of store-item groups to make submodel for
             independent = [bool] whether the submodel has independent groups
         """
         super(SplitLinear, self).__init__()
 
         input_size = num_hidden * num_groups
-        output_size = num_out * num_groups
+        output_size = num_groups
         self.linear = nn.Linear(input_size, output_size)
 
-        self.weight_idx = self._weight_indices(num_out, input_size, output_size)
         if independent:
+            self.weight_idx = self._weight_indices(input_size, output_size)
             with torch.no_grad():
                 self.linear.weight[self.weight_idx] = 0
                 self.linear.weight.register_hook(self._split_hook)
 
     @staticmethod
-    def _weight_indices(num_out, input_size, output_size):
+    def _weight_indices(input_size, output_size):
         """Compute inter-group weight index array for group independence.
 
         Args:
-            num_out     = [int] number of output units per store-item group
             input_size  = [int] total number of input units
             output_size = [int] total number of output units
 
@@ -254,7 +252,6 @@ class SplitLinear(nn.Module):
             ))
             col_indices.append(col_index)
         col_indices = torch.stack(col_indices)
-        col_indices = col_indices.repeat_interleave(num_out, dim=0)
 
         return row_indices, col_indices
 
@@ -269,10 +266,10 @@ class SplitLinear(nn.Module):
         """Forward pass of the split linear layer.
 
         Args:
-            input = [torch.Tensor] input of shape (1, num_groups * num_hidden)
+            input = [torch.Tensor] input of shape (T, num_groups * num_hidden)
 
         Returns:
-            Output of shape (1, num_groups * num_out).
+            Output of shape (T, num_groups * num_out).
         """
         y = self.linear(input)
 
@@ -308,10 +305,10 @@ class SplitLSTM(nn.Module):
         self.lstm = nn.LSTM(input_size, hidden_size, batch_first=True)
         self.hidden = None
 
-        # compute index array for easy and fast indexing
-        weight_indices = self._weight_indices(input_size, hidden_size)
-        self.ih_weight_idx, self.hh_weight_idx = weight_indices
         if independent:
+            # compute index array for easy and fast indexing
+            weight_indices = self._weight_indices(input_size, hidden_size)
+            self.ih_weight_idx, self.hh_weight_idx = weight_indices
             with torch.no_grad():
                 # set weights to zero
                 self.lstm.weight_ih_l0[self.ih_weight_idx] = 0
@@ -382,11 +379,10 @@ class SplitLSTM(nn.Module):
 
         return grad
 
-    @staticmethod
-    def _detach_hidden(hidden):
+    def _detach_hidden(self):
         """Detach hidden state from computational graph for next iteration."""
-        h_n, c_n = hidden
-        return h_n.detach(), c_n.detach()
+        h_n, c_n = self.hidden
+        self.hidden = h_n.detach(), c_n.detach()
 
     def forward(self, input, keep_hidden):
         """Forward pass of the split LSTM.
@@ -403,7 +399,9 @@ class SplitLSTM(nn.Module):
 
         # detach hidden state for next iterations
         if keep_hidden:
-            self.hidden = self._detach_hidden(hidden)
+            self.hidden = hidden
+        else:
+            self._detach_hidden()
 
         return y
 
@@ -429,7 +427,7 @@ class SubModel(nn.Module):
 
         self.num_groups = num_groups
         self.lstm = SplitLSTM(self.num_groups, independent)
-        self.fc = SplitLinear(num_out, self.num_groups, independent)
+        self.fc = SplitLinear(self.num_groups, independent)
 
     def reset_hidden(self):
         """Resets the hidden state of the LSTM."""
@@ -452,17 +450,15 @@ class SubModel(nn.Module):
         t_x = torch.cat((t_day, t_items.flatten(start_dim=-2)), dim=-1)
 
         # run LSTM on inputs
-        lstm_hidden = self.lstm(x, keep_hidden=True)
+        self.lstm(x, keep_hidden=True)
 
         # run LSTM on hidden states
-        lstm_out = self.lsmt(t_x, keep_hidden=False)
+        lstm_out = self.lstm(t_x, keep_hidden=False)
         h = lstm_out.squeeze(0)
 
         # run linear layer on output of LSTM
-        y = self.fc(lstm_out).T
-
-        # add the group dimension back
-        y = y.view(items.shape[0], self.num_groups, -1)
+        y = self.fc(h)
+        y = y.T.unsqueeze(0)
 
         return y
 

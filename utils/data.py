@@ -135,7 +135,7 @@ class ForecastDataset(Dataset):
     def __len__(self):
         """Returns number of items in the dataset."""
         if self.horizon:
-            return (len(self.sales) - 1) // self.seq_len
+            return (len(self.sales) - 2) // self.seq_len
         else:
             return len(self.prices) - 1
 
@@ -146,7 +146,7 @@ class ForecastDataset(Dataset):
 
         # determine index at start and end of sequence
         idx = idx * self.seq_len + self.start_idx
-        end_idx = min(idx + self.seq_len, len(self.sales) - 1)
+        end_idx = min(idx + self.seq_len, len(self.sales) - 2)
 
         # get data constant per store-item
         day = self.day[idx + 1:end_idx + 1]
@@ -164,7 +164,7 @@ class ForecastDataset(Dataset):
         items = (items - 2.029751) / 3.42601
 
         # get data constant per store-item
-        targets_end_idx = min(end_idx + self.horizon, len(self.sales))
+        targets_end_idx = min(end_idx + self.horizon + 1, len(self.sales))
         targets_day = self.day[end_idx + 1:targets_end_idx + 1]
 
         # stack all data different per store-item
