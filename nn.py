@@ -179,16 +179,16 @@ class WRMSSE(nn.Module):
             Tensor with a single value for the loss.
         """
         # determine horizon to compute loss over
-        horizon = target.shape[2]
+        horizon = target.shape[0]
 
         # select correct columns and aggregate to all levels of the hierarchy
-        input = input.squeeze(0)[:, :horizon]
+        input = input[:horizon].T
         projected_sales = self._aggregate(
             input, self.permutations, self.group_indices
         )
 
         # remove batch dim, put on GPU, and aggregate to all levels of hierarchy
-        target = target.squeeze(0).to(self.device)
+        target = target.T.to(self.device)
         actual_sales = self._aggregate(
             target, self.permutations, self.group_indices
         )
@@ -415,7 +415,7 @@ class SubModel(nn.Module):
         num_groups = [int] number of groups this submodel will process
     """
 
-    def __init__(self, num_out, num_groups, independent):
+    def __init__(self, num_groups, independent):
         """Initializes the submodel.
 
         Args:
@@ -458,7 +458,6 @@ class SubModel(nn.Module):
 
         # run linear layer on output of LSTM
         y = self.fc(h)
-        y = y.T.unsqueeze(0)
 
         return y
 
@@ -472,11 +471,10 @@ class Model(nn.Module):
         device           = [torch.device] device to put the model and data on
     """
 
-    def __init__(self, num_out, num_models, device, independent=True):
+    def __init__(self, num_models, device, independent=True):
         """Initializes the model.
 
         Args:
-            num_out     = [int] number of output units per store-item group
             num_models  = [int] number of submodels to make
             device      = [torch.device] device to put the model and data on
             independent = [bool] whether each submodel has independent groups
@@ -493,7 +491,7 @@ class Model(nn.Module):
 
         self.submodels = nn.ModuleList()
         for num_model_groups in self.num_model_groups:
-            submodel = SubModel(num_out, num_model_groups, independent)
+            submodel = SubModel(num_model_groups, independent)
             submodel = submodel.to(device)
             self.submodels.append(submodel)
 
@@ -529,7 +527,7 @@ class Model(nn.Module):
             submodel = self.submodels[i]
             y.append(submodel(day, items, t_day, t_items))
 
-        return torch.cat(y, dim=-2)
+        return torch.cat(y, dim=-1)
 
 
 if __name__ == '__main__':

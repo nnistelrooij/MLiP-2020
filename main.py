@@ -58,7 +58,7 @@ if __name__ == '__main__':
     print('DEVICE:', device)
 
     # initialize network and show summary
-    model = Model(args.horizon, args.num_models, device, not args.dependent)
+    model = Model(args.num_models, device, not args.dependent)
 
     # TensorBoard writers
     current_time = datetime.now().strftime("%Y-%m-%d/%H'%M'%S")
