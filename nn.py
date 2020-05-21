@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torchsummary import summary
 
-num_const = 32
+num_const = 29
 num_var = 3
 num_hidden = 5
 num_groups = 30490
@@ -172,8 +172,8 @@ class WRMSSE(nn.Module):
         """Computes the WRMSSE loss.
 
         Args:
-            input  = [torch.Tensor] projected unit sales with shape (1, N, h)
-            target = [torch.Tensor] actual unit sales with shape (1, N, h)
+            input  = [torch.Tensor] projected unit sales with shape (h, N)
+            target = [torch.Tensor] actual unit sales with shape (h, N)
 
         Returns [torch.Tensor]:
             Tensor with a single value for the loss.
@@ -269,7 +269,7 @@ class SplitLinear(nn.Module):
             input = [torch.Tensor] input of shape (T, num_groups * num_hidden)
 
         Returns:
-            Output of shape (T, num_groups * num_out).
+            Output of shape (T, num_groups).
         """
         y = self.linear(input)
 
@@ -387,9 +387,14 @@ class SplitLSTM(nn.Module):
     def forward(self, input, keep_hidden):
         """Forward pass of the split LSTM.
 
+        If keep_hidden = True, self.hidden is saved in self.hidden without
+        detaching it from the computational graph. Otherwise, the current
+        self.hidden is kept and detached from the computational graph.
+
         Args:
-            input = [torch.Tensor] input of shape
+            input       = [torch.Tensor] input of shape
                 (1, seq_len, num_const + num_groups * num_var)
+            keep_hidden = [bool] whether to keep hidden state in self.hidden
 
         Returns [torch.Tensor]:
             Output of shape (1, seq_len, num_groups * num_hidden).
@@ -412,22 +417,18 @@ class SubModel(nn.Module):
     Attributes:
         lstm       = [SplitLSTM] LSTM part of the submodel
         fc         = [SplitLinear] fully-connected part of the submodel
-        num_groups = [int] number of groups this submodel will process
     """
 
     def __init__(self, num_groups, independent):
         """Initializes the submodel.
 
         Args:
-            num_out     = [int] number of output units per store-item group
-            num_groups  = [int] number of store-item groups to make submodel for
             independent = [bool] whether the submodel has independent groups
         """
         super(SubModel, self).__init__()
 
-        self.num_groups = num_groups
-        self.lstm = SplitLSTM(self.num_groups, independent)
-        self.fc = SplitLinear(self.num_groups, independent)
+        self.lstm = SplitLSTM(num_groups, independent)
+        self.fc = SplitLinear(num_groups, independent)
 
     def reset_hidden(self):
         """Resets the hidden state of the LSTM."""
@@ -441,9 +442,13 @@ class SubModel(nn.Module):
                 The shape should be (1, seq_len, num_const).
             items = [torch.Tensor] inputs different per store-item group
                 The shape should be (1, seq_len, num_groups, num_var).
+            t_day   = [torch.Tensor] targets unequal per store-item group
+                The shape should be (1, horizon, num_const).
+            t_items = [torch.Tensor] targets unequal per store-item group
+                The shape should be (1, horizon, num_groups, num_var).
 
         Returns [torch.Tensor]:
-            Output of shape (1, num_groups, num_out)
+            Output of shape (horizon, num_groups)
         """
         # put inputs in one tensor
         x = torch.cat((day, items.flatten(start_dim=-2)), dim=-1)
@@ -452,11 +457,11 @@ class SubModel(nn.Module):
         # run LSTM on inputs
         self.lstm(x, keep_hidden=True)
 
-        # run LSTM on hidden states
+        # run LSTM again on hidden states
         lstm_out = self.lstm(t_x, keep_hidden=False)
-        h = lstm_out.squeeze(0)
 
-        # run linear layer on output of LSTM
+        # run linear layer on output of LSTM in batch mode
+        h = lstm_out.squeeze(0)
         y = self.fc(h)
 
         return y
@@ -505,17 +510,22 @@ class Model(nn.Module):
     def forward(self, day, items, t_day, t_items):
         """Forward pass of the model.
 
-        `items` is split, such that each submodel receives the correct number
-        of inputs. Each submodel is run in order without concurrency.
+        items and t_items are split, such that each submodel receives the
+        correct number of inputs and targets. Each submodel is run in order
+        without making use of concurrency.
 
         Args:
             day   = [torch.Tensor] inputs constant per store-item group
                 The shape should be (1, seq_len, num_const).
             items = [torch.Tensor] inputs different per store-item group
-                The shape should be (1, seq_len, num_var, num_groups).
+                The shape should be (1, seq_len, num_groups, num_var).
+            t_day   = [torch.Tensor] targets unequal per store-item group
+                The shape should be (1, horizon, num_const).
+            t_items = [torch.Tensor] targets unequal per store-item group
+                The shape should be (1, horizon, num_groups, num_var).
 
         Returns [torch.Tensor]:
-            Output of shape (1, seq_len, num_groups, num_out)
+            Output of shape (horizon, num_groups)
         """
         day = day.to(self.device)
         items = items.to(self.device).split(self.num_model_groups, dim=-2)
