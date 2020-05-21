@@ -74,9 +74,11 @@ def train(model, train_loader, train_writer, optimizer, criterion, epoch):
         Number of days the model has been trained on in current epoch.
     """
     num_days = 0
-    for day, items, t in tqdm(train_loader, desc=f'Train Epoch {epoch}'):
+    for data in tqdm(train_loader, desc=f'Train Epoch {epoch}'):
+        day, items, t_day, t_items = data
+
         # predict sales projections
-        y = model(day, items)
+        y = model(day, items, t_day, t_items)
 
         # compute loss and show on TensorBoard every 100 iterations
         loss = criterion(y, t)

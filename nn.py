@@ -382,12 +382,13 @@ class SplitLSTM(nn.Module):
 
         return grad
 
-    def _detach_hidden(self):
+    @staticmethod
+    def _detach_hidden(hidden):
         """Detach hidden state from computational graph for next iteration."""
-        h_n, c_n = self.hidden
-        self.hidden = h_n.detach(), c_n.detach()
+        h_n, c_n = hidden
+        return h_n.detach(), c_n.detach()
 
-    def forward(self, input):
+    def forward(self, input, keep_hidden):
         """Forward pass of the split LSTM.
 
         Args:
@@ -398,10 +399,11 @@ class SplitLSTM(nn.Module):
             Output of shape (1, seq_len, num_groups * num_hidden).
         """
         # run the LSTM on the inputs
-        y, self.hidden = self.lstm(input, self.hidden)
+        y, hidden = self.lstm(input, self.hidden)
 
         # detach hidden state for next iterations
-        self._detach_hidden()
+        if keep_hidden:
+            self.hidden = self._detach_hidden(hidden)
 
         return y
 
@@ -433,7 +435,7 @@ class SubModel(nn.Module):
         """Resets the hidden state of the LSTM."""
         self.lstm.reset_hidden()
 
-    def forward(self, day, items):
+    def forward(self, day, items, t_day, t_items):
         """Forward pass of the submodel.
 
         Args:
@@ -447,13 +449,17 @@ class SubModel(nn.Module):
         """
         # put inputs in one tensor
         x = torch.cat((day, items.flatten(start_dim=-2)), dim=-1)
+        t_x = torch.cat((t_day, t_items.flatten(start_dim=-2)), dim=-1)
 
-        # run LSTM on input
-        lstm_out = self.lstm(x)
+        # run LSTM on inputs
+        lstm_hidden = self.lstm(x, keep_hidden=True)
 
-        # run linear layer on last output of LSTM
-        lstm_out = lstm_out[:, -1]  # take last day from sequence
-        y = self.fc(lstm_out)
+        # run LSTM on hidden states
+        lstm_out = self.lsmt(t_x, keep_hidden=False)
+        h = lstm_out.squeeze(0)
+
+        # run linear layer on output of LSTM
+        y = self.fc(lstm_out).T
 
         # add the group dimension back
         y = y.view(items.shape[0], self.num_groups, -1)
@@ -502,7 +508,7 @@ class Model(nn.Module):
         for submodel in self.submodels:
             submodel.reset_hidden()
 
-    def forward(self, day, items):
+    def forward(self, day, items, t_day, t_items):
         """Forward pass of the model.
 
         `items` is split, such that each submodel receives the correct number
@@ -518,12 +524,14 @@ class Model(nn.Module):
             Output of shape (1, seq_len, num_groups, num_out)
         """
         day = day.to(self.device)
-        items = items.to(self.device)
+        items = items.to(self.device).split(self.num_model_groups, dim=-2)
+        t_day = t_day.to(self.device)
+        t_items = t_items.to(self.device).split(self.num_model_groups, dim=-2)
 
         y = []
-        for i, items in enumerate(items.split(self.num_model_groups, dim=-2)):
+        for i, (items, t_items) in enumerate(zip(items, t_items)):
             submodel = self.submodels[i]
-            y.append(submodel(day, items))
+            y.append(submodel(day, items, t_day, t_items))
 
         return torch.cat(y, dim=-2)
 
