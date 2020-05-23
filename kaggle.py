@@ -19,7 +19,7 @@ def infer(model, loader):
         evaluation = sales projections of 28 days after validation days
     """
     # initialize projections as tensor
-    projections = torch.zeros(len(loader), 30490)
+    projections = torch.empty(len(loader), 30490)
 
     with torch.no_grad():
         for i, (day, items, sales) in enumerate(tqdm(loader)):
@@ -34,7 +34,7 @@ def infer(model, loader):
 
             # add new projections based on old projections
             y = model(day[:, :1], items[:, :1], day[:, 1:], items[:, 1:])
-            projections[i:i + 1] += y
+            projections[i] = y
 
     # select validation and evaluation projections from all projections
     validation = projections[-56:-28].T
