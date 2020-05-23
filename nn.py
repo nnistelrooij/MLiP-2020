@@ -176,30 +176,26 @@ class WRMSSE(nn.Module):
         """Computes the WRMSSE loss.
 
         Args:
-            input  = [torch.Tensor] projected unit sales with shape (h, N)
-            target = [torch.Tensor] actual unit sales with shape (h, N)
+            input  = [torch.Tensor] projected sales of shape (horizon, 30490)
+            target = [torch.Tensor] actual sales with shape (horizon, 30490)
 
         Returns [torch.Tensor]:
             Tensor with a single value for the loss.
         """
-        # determine horizon to compute loss over
-        horizon = target.shape[0]
-
-        # select correct columns and aggregate to all levels of the hierarchy
-        input = input[:horizon].T
+        # aggregate to all levels of the hierarchy
         projected_sales = self._aggregate(
-            input, self.permutations, self.group_indices
+            input.T, self.permutations, self.group_indices
         )
 
-        # remove batch dim, put on GPU, and aggregate to all levels of hierarchy
-        target = target.T.to(self.device)
+        # put target on GPU and aggregate to all levels of the hierarchy
+        target = target.to(self.device)
         actual_sales = self._aggregate(
-            target, self.permutations, self.group_indices
+            target.T, self.permutations, self.group_indices
         )
 
         # compute WRMSSE loss
         squared_errors = (actual_sales - projected_sales)**2
-        MSE = torch.sum(squared_errors, dim=1) / horizon
+        MSE = torch.sum(squared_errors, dim=1) / input.shape[0]
         RMSSE = torch.sqrt(MSE / self.scales + 1e-18)
         loss = torch.sum(self.weights * RMSSE)
 
@@ -223,9 +219,9 @@ class Dropout(nn.Module):
         """
         super(Dropout, self).__init__()
 
-        self.q = 1 - p
+        self.q = 1 - p + 1e-18
         self.weight_idx = weight_idx
-        self.bernoulli = Bernoulli(self.q)
+        self.bernoulli = Bernoulli(1 - p)
 
     def forward(self, weight):
         """Forward pass of Droput module.
@@ -236,9 +232,11 @@ class Dropout(nn.Module):
         Returns [torch.Tensor]:
             Weights, where on some of self.weight_idx, they are set to zero.
         """
-        if self.training:
-            sample = self.bernoulli.sample(self.weight_idx[1].shape)
-            weight[self.weight_idx] *= sample * (1 / self.q)
+        with torch.no_grad():
+            if self.training:
+                sample = self.bernoulli.sample(self.weight_idx[1].shape)
+                weight[self.weight_idx] *= sample * (1 / self.q)
+
         return weight
 
 
@@ -258,9 +256,9 @@ class SplitLinear(nn.Module):
             num_groups = [int] number of store-item groups to make submodel for
             dropout    = [float] probability of dropping inter-group weight
         """
-        super(SplitLinear, self).__init__()
-
         global num_hidden
+
+        super(SplitLinear, self).__init__()
 
         # initialize parameters of fully-connected layer
         in_features = num_hidden * num_groups
@@ -351,8 +349,8 @@ class SplitLSTM(nn.RNNBase):
         # compute index arrays and initialize dropout modules
         weight_indices = self._weight_indices(input_size, hidden_size)
         ih_weight_idx, hh_weight_idx = weight_indices
-        self.ih_dropout = Dropout(p=dropout, weight_idx=ih_weight_idx)
-        self.hh_dropout = Dropout(p=dropout, weight_idx=hh_weight_idx)
+        self.dropout_ih = Dropout(p=dropout, weight_idx=ih_weight_idx)
+        self.dropout_hh = Dropout(p=dropout, weight_idx=hh_weight_idx)
 
     def check_forward_args(self, input, hidden, batch_sizes=None):
         """Check validity of shapes of input and hidden and cell states."""
@@ -437,9 +435,14 @@ class SplitLSTM(nn.RNNBase):
                                 dtype=input.dtype, device=input.device)
             self.hx = zeros, zeros
 
+        # set some inter-group weights to zero with Dropout
+        weight_ih = self.dropout_ih(self.weight_ih_l0)
+        weight_hh = self.dropout_hh(self.weight_hh_l0)
+        flat_weights = [weight_ih, weight_hh, self.bias_ih_l0, self.bias_hh_l0]
+
         # run LSTM on input and parameters
         self.check_forward_args(input, self.hx)
-        result = nn._VF.lstm(input, self.hx, self._flat_weights, self.bias,
+        result = nn._VF.lstm(input, self.hx, flat_weights, self.bias,
                              self.num_layers, self.dropout, self.training,
                              self.bidirectional, self.batch_first)
         y, hidden = result[0], result[1:]
@@ -504,7 +507,7 @@ class SubModel(nn.Module):
         h = self.lstm(t_x, keep_hidden=False)
 
         # run linear layer in batch mode on output of LSTM
-        y = self.fc(h.sqeeeze(0))
+        y = self.fc(h.squeeze(0))
 
         return y
 
