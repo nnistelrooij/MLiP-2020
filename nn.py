@@ -1,8 +1,11 @@
+import math
+
 import numpy as np
 import pandas as pd
 import torch
 from torch.distributions.bernoulli import Bernoulli
 import torch.nn as nn
+import torch.nn.functional as F
 from torchsummary import summary
 
 num_const = 29
@@ -234,71 +237,72 @@ class Dropout(nn.Module):
             Weights, where on some of self.weight_idx, they are set to zero.
         """
         if self.training:
-            sample = self.bernoulli.sample(self.weight_idx.shape)
+            sample = self.bernoulli.sample(self.weight_idx[1].shape)
             weight[self.weight_idx] *= sample * (1 / self.q)
-            return weight
         return weight
 
 
 class SplitLinear(nn.Module):
-    """Module for fully-connected layer with independent sub-layers.
+    """Module for fully-connected layer with loosely dependent sub-layers.
 
     Attributes:
-        linear     = [nn.Linear] linear layer as basis
-        weight_idx = [[torch.Tensor]*2] weight index arrays
+        weight  = [nn.Parameter] parameter that holds the FC layer weights
+        bias    = [nn.Parameter] parameter that holds the FC layer biases
+        dropout = [Dropout] module to zero out subset of inter-group weights
     """
 
-    def __init__(self, num_groups, independent):
-        """Initializes linear layer with or without independent sub-layers.
+    def __init__(self, num_groups, dropout):
+        """Initializes linear layer with loosely dependent sub-layers.
 
         Args:
-            num_groups  = [int] number of store-item groups to make submodel for
-            independent = [bool] whether the submodel has independent groups
+            num_groups = [int] number of store-item groups to make submodel for
+            dropout    = [float] probability of dropping inter-group weight
         """
         super(SplitLinear, self).__init__()
 
-        input_size = num_hidden * num_groups
-        output_size = num_groups
-        self.linear = nn.Linear(input_size, output_size)
+        global num_hidden
 
-        if independent:
-            self.weight_idx = self._weight_indices(input_size, output_size)
-            with torch.no_grad():
-                self.linear.weight[self.weight_idx] = 0
-                self.linear.weight.register_hook(self._split_hook)
+        in_features = num_hidden * num_groups
+        out_features = num_groups
+        self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
+        self.bias = nn.Parameter(torch.Tensor(out_features))
+        self.reset_parameters()
+
+        weight_idx = self._weight_indices(in_features, out_features)
+        self.dropout = Dropout(p=dropout, weight_idx=weight_idx)
+
+    def reset_parameters(self):
+        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+
+        fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
+        bound = 1 / math.sqrt(fan_in)
+        nn.init.uniform_(self.bias, -bound, bound)
 
     @staticmethod
-    def _weight_indices(input_size, output_size):
-        """Compute inter-group weight index array for group independence.
+    def _weight_indices(in_features, out_features):
+        """Compute inter-group weight index arrays.
 
         Args:
-            input_size  = [int] total number of input units
-            output_size = [int] total number of output units
+            input_size  = [int] total number of inputs
+            output_size = [int] total number of outputs
 
         Returns [[torch.Tensor]*2]:
-            Weight index array for easily setting weights to zero.
+            Weight index arrays for easily dropping out inter-group weights.
         """
         global num_hidden
 
-        row_indices = torch.arange(output_size).view(-1, 1)
+        row_indices = torch.arange(out_features).view(-1, 1)
 
         col_indices = []
-        for i in range(0, input_size, num_hidden):
+        for i in range(0, in_features, num_hidden):
             col_index = torch.cat((
                 torch.arange(0, i),
-                torch.arange(i + num_hidden, input_size)
+                torch.arange(i + num_hidden, in_features)
             ))
             col_indices.append(col_index)
         col_indices = torch.stack(col_indices)
 
         return row_indices, col_indices
-
-    def _split_hook(self, grad):
-        """Backward hook to zero gradients."""
-        grad = grad.clone()
-        grad[self.weight_idx] = 0
-
-        return grad
 
     def forward(self, input):
         """Forward pass of the split linear layer.
@@ -309,9 +313,9 @@ class SplitLinear(nn.Module):
         Returns:
             Output of shape (T, num_groups).
         """
-        y = self.linear(input)
+        weight = self.dropout(self.weight)
 
-        return y
+        return F.linear(input, weight, self.bias)
 
 
 class SplitLSTM(nn.Module):
