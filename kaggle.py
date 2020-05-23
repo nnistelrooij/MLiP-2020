@@ -8,7 +8,7 @@ from nn import Model
 
 
 def infer(model, loader, window_size):
-    """Infer the unit sales with the model.
+    """Infer unit sales of next days with the model.
 
     Args:
         model       = [nn.Module] trained model
@@ -17,41 +17,49 @@ def infer(model, loader, window_size):
 
     Returns [[torch.Tensor]*2]:
         validation = sales projections of next 28 days
-        evaluation = sales projects of next 28 days after validation
+        evaluation = sales projects of next 28 days after validation days
     """
-    # initialize
-    projections = torch.zeros(30490, len(loader) + window_size - 1)
+    # initialize projections and window size as tensors
+    projections = torch.zeros(len(loader), 30490)
+    window_size = torch.tensor(window_size)
 
     with torch.no_grad():
-        for i, (day, items) in enumerate(tqdm(loader)):
-            if items.shape[-1] == 2:  # use sales projections at end of data
-                projection = projections[:, i - 1] / window_size
-                projection = projection.view(1, 1, -1, 1).to('cpu')
-                items = torch.cat((items, projection), dim=-1)
+        for i, (day, items, sales) in enumerate(tqdm(loader)):
+            # find missing sales in projections
+            start_idx = sales.shape[1] - 2 + i
+            end_idx = items.shape[1] - 2 + i
+            projection = projections[start_idx:end_idx]
 
-            y = model(day, items)
-            projections[:, i:i + window_size] += y[0, :, :window_size]
+            # take average of projection
+            length = window_size + 1 - items.shape[1]
+            num_sums = torch.arange(len(projection) + length, length, step=-1)
+            num_sums = torch.min(num_sums, window_size)
+            projection = projection / num_sums.view(-1, 1)
+            projection = projection.view(1, len(projection), 30490, 1)
+
+            # concatenate inputs
+            sales = torch.cat((sales, projection), dim=1)
+            items = torch.cat((items, sales), dim=-1)
+
+            # add new projections based on old projections
+            y = model(day[:, :1], items[:, :1], day[:, 1:], items[:, 1:])
+            projections[i:i + y.shape[0]] += y
 
     # select validation and evaluation projections from all projections
-    eval_idx = -28 - window_size + 1
-    validation = projections[:, eval_idx - 28:eval_idx]
-    if window_size == 1:
-        evaluation = projections[:, eval_idx:]
-    else:
-        evaluation = projections[:, eval_idx:-window_size + 1]
+    validation = projections[-56:-28] / window_size
+    evaluation = projections[-28:] / window_size
 
-    return validation, evaluation
+    return validation.T, evaluation.T
 
 
 if __name__ == '__main__':
     device = torch.device('cpu')
-    horizon = 5  # forecasting horizon
-    num_models = 4000  # number of submodels
-    num_days = 36  # number of days prior the days with missing sales
-    window_size = 1  # how much rolling average to apply, window_size <= horizon
+    num_models = 1500  # number of submodels
+    num_days = 10  # number of days prior the days with missing sales
+    window_size = 8  # how much rolling average to apply
 
     # initialize trained model on correct device
-    model = Model(horizon, num_models, device)
+    model = Model(num_models, device)
     model.load_state_dict(torch.load('models/model.pt', map_location=device))
     model.reset_hidden()
     model.eval()
@@ -69,12 +77,13 @@ if __name__ == '__main__':
     sales = sales.sort_values(by=['store_id', 'item_id'])
     sales.index = range(sales.shape[0])
 
-    dataset = ForecastDataset(calendar, prices, sales, seq_len=1, horizon=0)
+    dataset = ForecastDataset(calendar, prices, sales,
+                              seq_len=window_size, horizon=0)
     loader = DataLoader(dataset)
 
     validation, evaluation = infer(model, loader, window_size)
-    columns = [f'F{i}' for i in range(1, 29)]
 
+    columns = [f'F{i}' for i in range(1, 29)]
     validation = pd.DataFrame(validation.tolist(), columns=columns)
     validation = pd.concat((sales[['id']], validation), axis=1)
 

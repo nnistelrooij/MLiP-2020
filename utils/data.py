@@ -203,20 +203,20 @@ class ForecastDataset(Dataset):
 
         If horizon = 0, i.e. inference mode, then sales may have a different
         sequence length than items. So then day, items, and sales separately,
-        are returned. The size of day and items might be smaller than seq_len
-        and sales may be empty.
+        are returned. The size of day and items might be smaller than
+        seq_len + 1 and sales may be empty.
 
         Returns [[np.ndarray]*3]:
-            day   = data constant per store-item of shape (seq_len, 29)
-                weekdays  = one-hot vector of shape (seq_len, 7)
-                weeks     = integer in range [1, 53] of shape (seq_len, 1)
-                monthdays = integer in range [1, 31] of shape (seq_len, 1)
-                months    = one-hot vector of shape (seq_len, 12)
-                years     = one-hot vector of shape (seq_len, 3)
-                events    = one-hot vector of shape (seq_len, 5)
-            items = data different per store-item of shape (seq_len, 30490, 2)
-                snap      = booleans of shape (seq_len, 30490)
-                prices    = floats of shape (seq_len, 30490)
+            day   = data constant per store-item of shape (seq_len + 1, 29)
+                weekdays  = one-hot vector of shape (seq_len + 1, 7)
+                weeks     = integer in range [1, 53] of shape (seq_len + 1, 1)
+                monthdays = integer in range [1, 31] of shape (seq_len + 1, 1)
+                months    = one-hot vector of shape (seq_len + 1, 12)
+                years     = one-hot vector of shape (seq_len + 1, 3)
+                events    = one-hot vector of shape (seq_len + 1, 5)
+            items = data unequal per store-item of shape (seq_len + 1, 30490, 2)
+                snap      = booleans of shape (seq_len + 1, 30490)
+                prices    = floats of shape (seq_len + 1, 30490)
             sales = sales of previous days per store-item of shape (T, 30490, 1)
         """
         end_idx = idx + self.seq_len + 1
