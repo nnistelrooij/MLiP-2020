@@ -10,7 +10,7 @@ class ForecastDataset(Dataset):
     """Dataset to load forecasts.
 
     Attributes:
-        day       = [np.ndarray] data constant per store-item
+        day       = [np.ndarray] data constant per store-item group
         snap      = [np.ndarray] whether or not SNAP purchases are allowed
         prices    = [np.ndarray] sell prices of each item at all stores
         sales     = [np.ndarray] unit sales of each item at all stores
@@ -77,8 +77,8 @@ class ForecastDataset(Dataset):
 
     @staticmethod
     def _years(calendar):
-        """One-hot representation of years of shape (days, 6)."""
-        return pd.RangeIndex(2011, 2017) == calendar[['year']]
+        """One-hot representation of years of shape (days, 3)."""
+        return pd.RangeIndex(2014, 2017) == calendar[['year']]
 
     @staticmethod
     def _event_types(calendar):
@@ -135,77 +135,65 @@ class ForecastDataset(Dataset):
     def __len__(self):
         """Returns number of items in the dataset."""
         if self.horizon:
-            return (len(self.sales) - 1) // self.seq_len
+            return (len(self.sales) - 2) // self.seq_len
         else:
             return len(self.prices) - 1
 
     def _get_train_item(self, idx):
+        """Get input and target data during training or validation.
+
+        Each epoch, a different starting index is sampled to increase data
+        diversity.
+        The actual size of the returned arrays might not be exactly seq_len
+        and horizon, but since the model can handle an arbitrary sequence
+        length, that is not really a problem.
+
+        Returns [[np.ndarray]*4]:
+            day   = input data constant per store-item of shape (seq_len, 29)
+            t_day = target data constant per store-item of shape (horizon, 29)
+                weekdays  = one-hot vectors of shape (T, 7)
+                weeks     = integers in range [1, 53] of shape (T, 1)
+                monthdays = integers in range [1, 31] of shape (T, 1)
+                months    = one-hot vectors of shape (T, 12)
+                years     = one-hot vectors of shape (T, 3)
+                events    = one-hot vectors of shape (T, 5)
+            items   = input data unequal per store-item; shape (seq_len, N, 3)
+            t_items = target data unequal per store-item; shape (horizon, N, 3)
+                snap      = booleans of shape (T, 30490)
+                prices    = floats of shape (T, 30490)
+                sales     = integers of shape (T, 30490)
+        """
         # pick random start index to get different data each epoch
         if idx == 0:
             ForecastDataset.start_idx = random.randrange(self.seq_len)
 
         # determine index at start and end of sequence
         idx = idx * self.seq_len + self.start_idx
-        end_idx = min(idx + self.seq_len, len(self.sales) - 1)
+        end_idx = min(idx + self.seq_len, len(self.sales) - 2)
+        targets_end_idx = min(end_idx + self.horizon + 1, len(self.sales))
 
-        # get data constant per store-item
+        # get data constant per store-item group
         day = self.day[idx + 1:end_idx + 1]
+        targets_day = self.day[end_idx + 1:targets_end_idx + 1]
 
-        # stack all data different per store-item
+        # stack all data different per store-item group
         items = np.stack((
             self.snap[idx + 1:end_idx + 1],
             self.prices[idx + 1:end_idx + 1],
             self.sales[idx:end_idx]),
             axis=2
         )
+        targets_items = np.stack((
+            self.snap[end_idx + 1:targets_end_idx + 1],
+            self.prices[end_idx + 1:targets_end_idx + 1],
+            self.sales[end_idx:targets_end_idx]),
+            axis=2
+        )
 
-        # normalize inputs to unit Gaussian distribution
-        day = (day - 1.4436644) / 6.093091
-        items = (items - 2.029751) / 3.42601
-
-        # get targets in shape (N, |targets|)
-        targets = self.sales[end_idx:end_idx + self.horizon].T
-
-        return day, items, targets
+        return day, items, targets_day, targets_items
 
     def _get_inference_item(self, idx):
-        # get data constant per store-item
-        day = self.day[np.newaxis, idx + 1]
-
-        # stack only SNAP and prices data; sales has variable length
-        items = np.hstack((
-            self.snap[idx + 1:idx + 2].T,
-            self.prices[idx + 1:idx + 2].T,
-            self.sales[idx:idx + 1].T)
-        )[np.newaxis]
-
-        # normalize inputs to unit Gaussian distribution
-        day = (day - 1.4436644) / 6.093091
-        items = (items - 2.029751) / 3.42601
-
-        return day, items
-
-    def __getitem__(self, idx):
-        """Get data for self.seq_len days and targets for self.horizon days.
-
-        If horizon > 0, i.e. training or validation mode, the targets need to be
-        returned. Sales does not have a variable length, so it can be returned
-        within items. So then day, items with sales, and targets are returned.
-
-        Returns [[np.ndarray]*3]:
-            day     = data constant per store-item of shape (seq_len, 32)
-                weekdays  = one-hot vectors of shape (seq_len, 7)
-                weeks     = integers in range [1, 53] of shape (seq_len, 1)
-                monthdays = integers in range [1, 31] of shape (seq_len, 1)
-                months    = one-hot vectors of shape (seq_len, 12)
-                years     = one-hot vectors of shape (seq_len, 6)
-                events    = one-hot vectors of shape (seq_len, 5)
-            items   = data different per store-item of shape (seq_len, 3, N)
-                snap      = booleans of shape (seq_len, N)
-                prices    = floats of shape (seq_len, N)
-                sales     = integers of shape (seq_len, N)
-            targets = unit sales of next days of shape (N, |targets|),
-                where 1 <= |targets| <= horizon
+        """Get input data during inference.
 
         If horizon = 0, i.e. inference mode, then sales may be empty, which
         means that items may not contian sales. So then day and items
@@ -225,6 +213,23 @@ class ForecastDataset(Dataset):
                 sales     = unit sales of previous day of shape (|sales|, N),
                     where 0 <= |sales| <= 1
         """
+        # get data constant per store-item
+        day = self.day[np.newaxis, idx + 1]
+
+        # stack only SNAP and prices data; sales has variable length
+        items = np.hstack((
+            self.snap[idx + 1:idx + 2].T,
+            self.prices[idx + 1:idx + 2].T,
+            self.sales[idx:idx + 1].T)
+        )[np.newaxis]
+
+        # normalize inputs to unit Gaussian distribution
+        day = (day - 1.4436644) / 6.093091
+        items = (items - 2.029751) / 3.42601
+
+        return day, items
+
+    def __getitem__(self, idx):
         if self.horizon:  # training or validation mode
             return self._get_train_item(idx)
         else:  # inference mode
@@ -295,7 +300,7 @@ if __name__ == '__main__':
 
     path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning '
             'in Practice\\Competition 2\\project\\')
-    calendar, prices, sales = load_data(path, -365)
+    calendar, prices, sales = data_frames(path)
 
     # train_loader, val_loader = data_loaders(calendar, prices, sales, 28, 8, 5)
 
@@ -309,8 +314,9 @@ if __name__ == '__main__':
 
     loader = DataLoader(dataset)
     time = datetime.now()
-    for day, items, targets in loader:
-        print('training: ', day.shape[1], items.shape[1], targets.shape[2])
+    for day, items, targets_day, targets_items in loader:
+        print('training: ', day.shape[1], items.shape[1],
+              targets_day.shape[1], targets_items.shape[1])
         pass
     print('Time to retrieve data: ', datetime.now() - time)
 

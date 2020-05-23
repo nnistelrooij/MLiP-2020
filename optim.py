@@ -74,12 +74,14 @@ def train(model, train_loader, train_writer, optimizer, criterion, epoch):
         Number of days the model has been trained on in current epoch.
     """
     num_days = 0
-    for day, items, t in tqdm(train_loader, desc=f'Train Epoch {epoch}'):
+    for data in tqdm(train_loader, desc=f'Train Epoch {epoch}'):
+        day, items, t_day, t_items = data
+
         # predict sales projections
-        y = model(day, items)
+        y = model(day, items, t_day[:, :-1], t_items[:, :-1])
 
         # compute loss and show on TensorBoard every 100 iterations
-        loss = criterion(y, t)
+        loss = criterion(y, t_items[0, 1:, :, 2])
         train_writer.show_loss(loss, day.shape[1])
 
         # update model's parameters
@@ -112,26 +114,37 @@ def validate(model, val_loader, val_writer, criterion, epoch, num_days):
 
     # start iterator with actual sales from previous day
     val_loader = iter(val_loader)
-    day, items, t = None, None, None
+    day, items, t_day, t_items = None, None, None, None
     for _ in range(ForecastDataset.start_idx + num_days + 1):
-        day, items, t = next(val_loader)
+        day, items, t_day, t_items = next(val_loader)
 
     with torch.no_grad():
         # initialize sales and targets columns for current day
-        y = model(day, items)
-        sales = y[..., :1]
-        targets = t[..., :1]
+        y = model(day, items, t_day[:, :-1], t_items[:, :-1])
+        sales = y
+        targets = t_items[0, 1:, :, 2]
 
-        for day, items, t in tqdm(val_loader, desc=f'Validation Epoch {epoch}'):
+        # add sales and targets for current day
+        day, items, t_day, t_items = next(val_loader)
+        t_items[0, 0, :, 2] = sales[-1]
+
+        y = model(day, items, t_day[:, :-1], t_items[:, :-1])
+        sales = torch.cat((sales, y))
+        targets = torch.cat((targets, t_items[0, 1:, :, 2]))
+
+        for data in tqdm(val_loader, desc=f'Validation Epoch {epoch}'):
+            day, items, t_day, t_items = data
+
             # replace actual sales in items with projected sales
-            items[:, 0, :, 2] = sales[..., -1]
+            items[0, 0, :, 2] = sales[-2]
+            t_items[0, 0, :, 2] = sales[-1]
 
             # predict with sales projections from previous days
-            y = model(day, items)
+            y = model(day, items, t_day[:, :-1], t_items[:, :-1])
 
             # add sales projections and targets to tables
-            sales = torch.cat((sales, y[..., :1]), dim=2)
-            targets = torch.cat((targets, t[..., :1]), dim=2)
+            sales = torch.cat((sales, y))
+            targets = torch.cat((targets, t_items[0, 1:, :, 2]))
 
     # compute loss over whole horizon and show on TensorBoard
     loss = criterion(sales, targets)

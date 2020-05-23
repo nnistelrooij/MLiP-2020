@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torchsummary import summary
 
-num_const = 32
+num_const = 29
 num_var = 3
 num_hidden = 5
 num_groups = 30490
@@ -172,23 +172,23 @@ class WRMSSE(nn.Module):
         """Computes the WRMSSE loss.
 
         Args:
-            input  = [torch.Tensor] projected unit sales with shape (1, N, h)
-            target = [torch.Tensor] actual unit sales with shape (1, N, h)
+            input  = [torch.Tensor] projected unit sales with shape (h, N)
+            target = [torch.Tensor] actual unit sales with shape (h, N)
 
         Returns [torch.Tensor]:
             Tensor with a single value for the loss.
         """
         # determine horizon to compute loss over
-        horizon = target.shape[2]
+        horizon = target.shape[0]
 
         # select correct columns and aggregate to all levels of the hierarchy
-        input = input.squeeze(0)[:, :horizon]
+        input = input[:horizon].T
         projected_sales = self._aggregate(
             input, self.permutations, self.group_indices
         )
 
         # remove batch dim, put on GPU, and aggregate to all levels of hierarchy
-        target = target.squeeze(0).to(self.device)
+        target = target.T.to(self.device)
         actual_sales = self._aggregate(
             target, self.permutations, self.group_indices
         )
@@ -210,32 +210,30 @@ class SplitLinear(nn.Module):
         weight_idx = [[torch.Tensor]*2] weight index arrays
     """
 
-    def __init__(self, num_out, num_groups, independent):
+    def __init__(self, num_groups, independent):
         """Initializes linear layer with or without independent sub-layers.
 
         Args:
-            num_out     = [int] number of output units per store-item group
             num_groups  = [int] number of store-item groups to make submodel for
             independent = [bool] whether the submodel has independent groups
         """
         super(SplitLinear, self).__init__()
 
         input_size = num_hidden * num_groups
-        output_size = num_out * num_groups
+        output_size = num_groups
         self.linear = nn.Linear(input_size, output_size)
 
-        self.weight_idx = self._weight_indices(num_out, input_size, output_size)
         if independent:
+            self.weight_idx = self._weight_indices(input_size, output_size)
             with torch.no_grad():
                 self.linear.weight[self.weight_idx] = 0
                 self.linear.weight.register_hook(self._split_hook)
 
     @staticmethod
-    def _weight_indices(num_out, input_size, output_size):
+    def _weight_indices(input_size, output_size):
         """Compute inter-group weight index array for group independence.
 
         Args:
-            num_out     = [int] number of output units per store-item group
             input_size  = [int] total number of input units
             output_size = [int] total number of output units
 
@@ -254,7 +252,6 @@ class SplitLinear(nn.Module):
             ))
             col_indices.append(col_index)
         col_indices = torch.stack(col_indices)
-        col_indices = col_indices.repeat_interleave(num_out, dim=0)
 
         return row_indices, col_indices
 
@@ -269,10 +266,10 @@ class SplitLinear(nn.Module):
         """Forward pass of the split linear layer.
 
         Args:
-            input = [torch.Tensor] input of shape (1, num_groups * num_hidden)
+            input = [torch.Tensor] input of shape (T, num_groups * num_hidden)
 
         Returns:
-            Output of shape (1, num_groups * num_out).
+            Output of shape (T, num_groups).
         """
         y = self.linear(input)
 
@@ -308,10 +305,10 @@ class SplitLSTM(nn.Module):
         self.lstm = nn.LSTM(input_size, hidden_size, batch_first=True)
         self.hidden = None
 
-        # compute index array for easy and fast indexing
-        weight_indices = self._weight_indices(input_size, hidden_size)
-        self.ih_weight_idx, self.hh_weight_idx = weight_indices
         if independent:
+            # compute index array for easy and fast indexing
+            weight_indices = self._weight_indices(input_size, hidden_size)
+            self.ih_weight_idx, self.hh_weight_idx = weight_indices
             with torch.no_grad():
                 # set weights to zero
                 self.lstm.weight_ih_l0[self.ih_weight_idx] = 0
@@ -387,21 +384,29 @@ class SplitLSTM(nn.Module):
         h_n, c_n = self.hidden
         self.hidden = h_n.detach(), c_n.detach()
 
-    def forward(self, input):
+    def forward(self, input, keep_hidden):
         """Forward pass of the split LSTM.
 
+        If keep_hidden = True, self.hidden is saved in self.hidden without
+        detaching it from the computational graph. Otherwise, the current
+        self.hidden is kept and detached from the computational graph.
+
         Args:
-            input = [torch.Tensor] input of shape
+            input       = [torch.Tensor] input of shape
                 (1, seq_len, num_const + num_groups * num_var)
+            keep_hidden = [bool] whether to keep hidden state in self.hidden
 
         Returns [torch.Tensor]:
             Output of shape (1, seq_len, num_groups * num_hidden).
         """
         # run the LSTM on the inputs
-        y, self.hidden = self.lstm(input, self.hidden)
+        y, hidden = self.lstm(input, self.hidden)
 
         # detach hidden state for next iterations
-        self._detach_hidden()
+        if keep_hidden:
+            self.hidden = hidden
+        else:
+            self._detach_hidden()
 
         return y
 
@@ -412,28 +417,24 @@ class SubModel(nn.Module):
     Attributes:
         lstm       = [SplitLSTM] LSTM part of the submodel
         fc         = [SplitLinear] fully-connected part of the submodel
-        num_groups = [int] number of groups this submodel will process
     """
 
-    def __init__(self, num_out, num_groups, independent):
+    def __init__(self, num_groups, independent):
         """Initializes the submodel.
 
         Args:
-            num_out     = [int] number of output units per store-item group
-            num_groups  = [int] number of store-item groups to make submodel for
             independent = [bool] whether the submodel has independent groups
         """
         super(SubModel, self).__init__()
 
-        self.num_groups = num_groups
-        self.lstm = SplitLSTM(self.num_groups, independent)
-        self.fc = SplitLinear(num_out, self.num_groups, independent)
+        self.lstm = SplitLSTM(num_groups, independent)
+        self.fc = SplitLinear(num_groups, independent)
 
     def reset_hidden(self):
         """Resets the hidden state of the LSTM."""
         self.lstm.reset_hidden()
 
-    def forward(self, day, items):
+    def forward(self, day, items, t_day, t_items):
         """Forward pass of the submodel.
 
         Args:
@@ -441,22 +442,27 @@ class SubModel(nn.Module):
                 The shape should be (1, seq_len, num_const).
             items = [torch.Tensor] inputs different per store-item group
                 The shape should be (1, seq_len, num_groups, num_var).
+            t_day   = [torch.Tensor] targets unequal per store-item group
+                The shape should be (1, horizon, num_const).
+            t_items = [torch.Tensor] targets unequal per store-item group
+                The shape should be (1, horizon, num_groups, num_var).
 
         Returns [torch.Tensor]:
-            Output of shape (1, num_groups, num_out)
+            Output of shape (horizon, num_groups)
         """
         # put inputs in one tensor
         x = torch.cat((day, items.flatten(start_dim=-2)), dim=-1)
+        t_x = torch.cat((t_day, t_items.flatten(start_dim=-2)), dim=-1)
 
-        # run LSTM on input
-        lstm_out = self.lstm(x)
+        # run LSTM on inputs
+        self.lstm(x, keep_hidden=True)
 
-        # run linear layer on last output of LSTM
-        lstm_out = lstm_out[:, -1]  # take last day from sequence
-        y = self.fc(lstm_out)
+        # run LSTM again on hidden states
+        lstm_out = self.lstm(t_x, keep_hidden=False)
 
-        # add the group dimension back
-        y = y.view(items.shape[0], self.num_groups, -1)
+        # run linear layer on output of LSTM in batch mode
+        h = lstm_out.squeeze(0)
+        y = self.fc(h)
 
         return y
 
@@ -470,11 +476,10 @@ class Model(nn.Module):
         device           = [torch.device] device to put the model and data on
     """
 
-    def __init__(self, num_out, num_models, device, independent=True):
+    def __init__(self, num_models, device, independent=True):
         """Initializes the model.
 
         Args:
-            num_out     = [int] number of output units per store-item group
             num_models  = [int] number of submodels to make
             device      = [torch.device] device to put the model and data on
             independent = [bool] whether each submodel has independent groups
@@ -491,7 +496,7 @@ class Model(nn.Module):
 
         self.submodels = nn.ModuleList()
         for num_model_groups in self.num_model_groups:
-            submodel = SubModel(num_out, num_model_groups, independent)
+            submodel = SubModel(num_model_groups, independent)
             submodel = submodel.to(device)
             self.submodels.append(submodel)
 
@@ -502,30 +507,37 @@ class Model(nn.Module):
         for submodel in self.submodels:
             submodel.reset_hidden()
 
-    def forward(self, day, items):
+    def forward(self, day, items, t_day, t_items):
         """Forward pass of the model.
 
-        `items` is split, such that each submodel receives the correct number
-        of inputs. Each submodel is run in order without concurrency.
+        items and t_items are split, such that each submodel receives the
+        correct number of inputs and targets. Each submodel is run in order
+        without making use of concurrency.
 
         Args:
             day   = [torch.Tensor] inputs constant per store-item group
                 The shape should be (1, seq_len, num_const).
             items = [torch.Tensor] inputs different per store-item group
-                The shape should be (1, seq_len, num_var, num_groups).
+                The shape should be (1, seq_len, num_groups, num_var).
+            t_day   = [torch.Tensor] targets unequal per store-item group
+                The shape should be (1, horizon, num_const).
+            t_items = [torch.Tensor] targets unequal per store-item group
+                The shape should be (1, horizon, num_groups, num_var).
 
         Returns [torch.Tensor]:
-            Output of shape (1, seq_len, num_groups, num_out)
+            Output of shape (horizon, num_groups)
         """
         day = day.to(self.device)
-        items = items.to(self.device)
+        items = items.to(self.device).split(self.num_model_groups, dim=-2)
+        t_day = t_day.to(self.device)
+        t_items = t_items.to(self.device).split(self.num_model_groups, dim=-2)
 
         y = []
-        for i, items in enumerate(items.split(self.num_model_groups, dim=-2)):
+        for i, (items, t_items) in enumerate(zip(items, t_items)):
             submodel = self.submodels[i]
-            y.append(submodel(day, items))
+            y.append(submodel(day, items, t_day, t_items))
 
-        return torch.cat(y, dim=-2)
+        return torch.cat(y, dim=-1)
 
 
 if __name__ == '__main__':
