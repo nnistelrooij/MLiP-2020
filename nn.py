@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import torch
+from torch.distributions.bernoulli import Bernoulli
 import torch.nn as nn
 from torchsummary import summary
 
@@ -200,6 +201,43 @@ class WRMSSE(nn.Module):
         loss = torch.sum(self.weights * RMSSE)
 
         return loss
+
+
+class Dropout(nn.Module):
+    """Module to dropout weights on specific indices.
+
+    Attributes:
+        q          = [float] probability of keeping a weight the same
+        weight_idx = [torch.Tensor] indices of weights to apply Dropout to
+        bernoulli  = [Bernoulli] Bernoulli sample distribution
+    """
+    def __init__(self, p, weight_idx):
+        """Initializes Dropout module.
+
+        Args:
+            p          = [float] probability of setting a weight to zero
+            weight_idx = [torch.Tensor] indices of weights to apply Dropout to
+        """
+        super(Dropout, self).__init__()
+
+        self.q = 1 - p
+        self.weight_idx = weight_idx
+        self.bernoulli = Bernoulli(self.q)
+
+    def forward(self, weight):
+        """Forward pass of Droput module.
+
+        Args:
+            weight = [torch.Tensor] weights to apply Dropout to
+
+        Returns [torch.Tensor]:
+            Weights, where on some of self.weight_idx, they are set to zero.
+        """
+        if self.training:
+            sample = self.bernoulli.sample(self.weight_idx.shape)
+            weight[self.weight_idx] *= sample * (1 / self.q)
+            return weight
+        return weight
 
 
 class SplitLinear(nn.Module):
