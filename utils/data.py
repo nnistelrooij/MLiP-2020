@@ -201,38 +201,35 @@ class ForecastDataset(Dataset):
     def _get_inference_item(self, idx):
         """Get input data during inference.
 
-        If horizon = 0, i.e. inference mode, then sales may have a different
-        sequence length than items. So then day, items, and sales separately,
-        are returned. The size of day and items might be smaller than
-        seq_len + 1 and sales may be empty.
+        If horizon = 0, i.e. inference mode, then sales may be empty. So day,
+        items, and sales separately, are returned.
 
         Returns [[np.ndarray]*3]:
-            day   = data constant per store-item of shape (seq_len + 1, 29)
-                weekdays  = one-hot vector of shape (seq_len + 1, 7)
-                weeks     = integer in range [1, 53] of shape (seq_len + 1, 1)
-                monthdays = integer in range [1, 31] of shape (seq_len + 1, 1)
-                months    = one-hot vector of shape (seq_len + 1, 12)
-                years     = one-hot vector of shape (seq_len + 1, 3)
-                events    = one-hot vector of shape (seq_len + 1, 5)
-            items = data unequal per store-item of shape (seq_len + 1, 30490, 2)
-                snap      = booleans of shape (seq_len + 1, 30490)
-                prices    = floats of shape (seq_len + 1, 30490)
-            sales = sales of previous days per store-item of shape (T, 30490, 1)
+            day   = data constant per store-item group of shape (2, 29)
+                weekdays  = one-hot vector of shape (2, 7)
+                weeks     = integer in range [1, 53] of shape (2, 1)
+                monthdays = integer in range [1, 31] of shape (2, 1)
+                months    = one-hot vector of shape (2, 12)
+                years     = one-hot vector of shape (2, 3)
+                events    = one-hot vector of shape (2, 5)
+            items = data different per store-item group of shape (2, 30490, 2)
+                snap      = booleans of shape (2, 30490)
+                prices    = floats of shape (2, 30490)
+            sales = sales of previous days per store-item group
+                The shape is (T, 30490, 1), where 0 <= T <= 2.
         """
-        end_idx = idx + self.seq_len + 1
-
         # get data constant per store-item
-        day = self.day[idx + 1:end_idx + 1]
+        day = self.day[idx + 1:idx + 3]
 
         # stack only SNAP and prices data; sales may have different length
         items = np.stack((
-            self.snap[idx + 1:end_idx + 1],
-            self.prices[idx + 1:end_idx + 1]),
+            self.snap[idx + 1:idx + 3],
+            self.prices[idx + 1:idx + 3]),
             axis=2
         )
 
         # get sales, which may be empty
-        sales = self.sales[idx:end_idx, :, np.newaxis]
+        sales = self.sales[idx:idx + 2, :, np.newaxis]
 
         return day, items, sales
 
