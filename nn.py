@@ -1,11 +1,7 @@
-import math
-
 import numpy as np
 import pandas as pd
 import torch
-from torch.distributions.bernoulli import Bernoulli
 import torch.nn as nn
-import torch.nn.functional as F
 from torchsummary import summary
 
 num_const = 29
@@ -202,80 +198,45 @@ class WRMSSE(nn.Module):
         return loss
 
 
-class Dropout(nn.Module):
-    """Module to dropout weights on specific indices.
+class Linear(nn.Module):
+    """Module for fully-connected layer for multiple groups.
+
+    The gradients of inter-group weights are multiplied with inter_group_lr
+    to control model complexity. Each weight is updated each iteration,
+    but the inter-group weights are updated slower.
 
     Attributes:
-        q          = [float] probability of keeping a weight the same
-        weight_idx = [torch.Tensor] indices of weights to apply Dropout to
-        bernoulli  = [Bernoulli] Bernoulli sample distribution
-    """
-    def __init__(self, p, weight_idx):
-        """Initializes Dropout module.
-
-        Args:
-            p          = [float] probability of setting a weight to zero
-            weight_idx = [torch.Tensor] indices of weights to apply Dropout to
-        """
-        super(Dropout, self).__init__()
-
-        self.q = 1 - p + 1e-18
-        self.weight_idx = weight_idx
-        self.bernoulli = Bernoulli(1 - p)
-
-    def forward(self, weight):
-        """Forward pass of Droput module.
-
-        Args:
-            weight = [torch.Tensor] weights to apply Dropout to
-
-        Returns [torch.Tensor]:
-            Weights, where on some of self.weight_idx, they are set to zero.
-        """
-        with torch.no_grad():
-            if self.training:
-                sample = self.bernoulli.sample(self.weight_idx[1].shape)
-                weight[self.weight_idx] *= sample * (1 / self.q)
-
-        return weight
-
-
-class SplitLinear(nn.Module):
-    """Module for fully-connected layer with loosely dependent sub-layers.
-
-    Attributes:
-        weight  = [nn.Parameter] parameter that holds the FC layer weights
-        bias    = [nn.Parameter] parameter that holds the FC layer biases
-        dropout = [Dropout] module to zero out subset of inter-group weights
+        linear         = [nn.Linear] FC layer basis
+        weight_idx     = [[torch.Tensor]*2] inter-group weight index arrays
+        inter_group_lr = [float] learning rate factor of inter-group weights
     """
 
-    def __init__(self, num_groups, dropout):
-        """Initializes linear layer with loosely dependent sub-layers.
+    def __init__(self, num_groups, inter_group_lr):
+        """Initializes linear layer for multiple groups.
 
         Args:
-            num_groups = [int] number of store-item groups to make submodel for
-            dropout    = [float] probability of dropping inter-group weight
+            num_groups     = [int] number of store-item groups to make layer for
+            inter_group_lr = [float] learning rate factor of inter-group weights
         """
         global num_hidden
 
-        super(SplitLinear, self).__init__()
+        super(Linear, self).__init__()
 
-        # initialize parameters of fully-connected layer
+        # initialize fully-connected layer basis and register backward hook
         in_features = num_hidden * num_groups
         out_features = num_groups
-        self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
-        self.bias = nn.Parameter(torch.Tensor(out_features))
-        self.reset_parameters()
+        self.linear = nn.Linear(in_features, out_features)
+        self.linear.weight.register_hook(self._hook)
 
-        weight_idx = self._weight_indices(in_features, out_features)
-        self.dropout = Dropout(p=dropout, weight_idx=weight_idx)
+        self.weight_idx = self._weight_indices(in_features, out_features)
+        self.inter_group_lr = inter_group_lr
 
-    def reset_parameters(self):
-        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+    def _hook(self, grad):
+        """Hook to reduce inter-group weight gradients."""
+        grad = grad.clone()
+        grad[self.weight_idx] *= self.inter_group_lr
 
-        fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
-        bound = 1 / math.sqrt(fan_in)
-        nn.init.uniform_(self.bias, -bound, bound)
+        return grad
 
     @staticmethod
     def _weight_indices(in_features, out_features):
@@ -286,7 +247,7 @@ class SplitLinear(nn.Module):
             output_size = [int] total number of outputs
 
         Returns [[torch.Tensor]*2]:
-            Weight index arrays for easily dropping out inter-group weights.
+            Index arrays for easily reducing inter-group weight gradients.
         """
         global num_hidden
 
@@ -304,7 +265,7 @@ class SplitLinear(nn.Module):
         return row_indices, col_indices
 
     def forward(self, input):
-        """Forward pass of the split linear layer.
+        """Forward pass of the linear layer.
 
         Args:
             input = [torch.Tensor] input of shape (T, num_groups * num_hidden)
@@ -312,59 +273,69 @@ class SplitLinear(nn.Module):
         Returns:
             Output of shape (T, num_groups).
         """
-        weight = self.dropout(self.weight)
-
-        return F.linear(input, weight, self.bias)
+        return self.linear(input)
 
 
-class SplitLSTM(nn.RNNBase):
-    """Module for LSTM with loosely dependent sub-layers.
+class LSTM(nn.Module):
+    """Module for LSTM for multiple groups.
+
+    The gradients of inter-group weights are multiplied with inter_group_lr
+    to control model complexity. Each weight is updated each iteration,
+    but the inter-group weights are updated slower.
 
     Attributes:
-        lstm          = [nn.LSTM] LSTM model as basis
-        hidden        = [[torch.Tensor]*2] last hidden and cell states of LSTM
+        lstm          = [nn.LSTM] LSTM as basis
+        hx            = [[torch.Tensor]*2] hidden and cell states of LSTM
         ih_weight_idx = [[torch.Tensor]*2] input-hidden weight index arrays
         hh_weight_idx = [[torch.Tensor]*2] hidden-hidden weight index arrays
+        inter_group_lr = [float] learning rate factor of inter-group weights
     """
 
-    def __init__(self, num_groups, dropout):
-        """Initializes LSTM with loosely dependent sub-layers.
+    def __init__(self, num_groups, inter_group_lr):
+        """Initializes LSTM for multiple groups.
 
         Args:
-            num_groups = [int] number of store-item groups to make LSTM for
-            dropout    = [float] probability of dropping inter-group weight
+            num_groups     = [int] number of store-item groups to make LSTM for
+            inter_group_lr = [float] learning rate factor of inter-group weights
         """
         global num_const
         global num_var
         global num_hidden
 
-        # initialize LSTM and hidden state of LSTM
+        super(LSTM, self).__init__()
+
+        # initialize LSTM basis and hidden state of LSTM
         input_size = num_const + num_var * num_groups
         hidden_size = num_hidden * num_groups
-        super(SplitLSTM, self).__init__(
-            'LSTM', input_size, hidden_size, batch_first=True
-        )
+        self.lstm = nn.LSTM(input_size, hidden_size, batch_first=True)
         self.hx = None
 
-        # compute index arrays and initialize dropout modules
+        # register input-hidden and hidden-hidden backward hooks
+        self.lstm.weight_ih_l0.register_hook(self._ih_hook)
+        self.lstm.weight_hh_l0.register_hook(self._hh_hook)
+
+        # compute index arrays and set learning rate factor
         weight_indices = self._weight_indices(input_size, hidden_size)
-        ih_weight_idx, hh_weight_idx = weight_indices
-        self.dropout_ih = Dropout(p=dropout, weight_idx=ih_weight_idx)
-        self.dropout_hh = Dropout(p=dropout, weight_idx=hh_weight_idx)
-
-    def check_forward_args(self, input, hidden, batch_sizes=None):
-        """Check validity of shapes of input and hidden and cell states."""
-        self.check_input(input, batch_sizes)
-        expected_hidden_size = self.get_expected_hidden_size(input, batch_sizes)
-
-        self.check_hidden_size(hidden[0], expected_hidden_size,
-                               'Expected hidden[0] size {}, got {}')
-        self.check_hidden_size(hidden[1], expected_hidden_size,
-                               'Expected hidden[1] size {}, got {}')
+        self.ih_weight_idx, self.hh_weight_idx = weight_indices
+        self.inter_group_lr = inter_group_lr
 
     def reset_hidden(self):
         """Reset hidden state of LSTM."""
         self.hx = None
+
+    def _ih_hook(self, grad):
+        """Hook to reduce input-hidden inter-group weight gradients."""
+        grad = grad.clone()
+        grad[self.ih_weight_idx] *= self.inter_group_lr
+
+        return grad
+
+    def _hh_hook(self, grad):
+        """Hook to reduce hidden-hidden inter-group weight gradients."""
+        grad = grad.clone()
+        grad[self.hh_weight_idx] *= self.inter_group_lr
+
+        return grad
 
     @staticmethod
     def _weight_indices(input_size, hidden_size):
@@ -375,7 +346,7 @@ class SplitLSTM(nn.RNNBase):
             hidden_size = [int] total number of hidden units
 
         Returns [[[torch.Tensor]*2]*2]:
-            Weight index arrays for easily dropping out inter-group weights.
+            Index arrays for easily reducing inter-group weight gradients.
         """
         global num_const
         global num_var
@@ -415,37 +386,22 @@ class SplitLSTM(nn.RNNBase):
         self.hx = h_n.detach(), c_n.detach()
 
     def forward(self, input, keep_hidden):
-        """Forward pass of the split LSTM.
+        """Forward pass of the LSTM.
 
-        If keep_hidden = True, the hidden state is saved in self.hidden without
-        detaching it from the computational graph. Otherwise, the current
-        self.hidden is kept and detached from the computational graph.
+        If keep_hidden = True, the hidden and cell states are saved in self.hx
+        without detaching them from the computational graph. Otherwise, the
+        current self.hx is kept and detached from the computational graph.
 
         Args:
             input       = [torch.Tensor] input of shape
                 (1, seq_len, num_const + num_groups * num_var)
-            keep_hidden = [bool] whether to keep hidden state in self.hidden
+            keep_hidden = [bool] keep hidden and cell states in self.hx
 
         Returns [torch.Tensor]:
             Output of shape (1, seq_len, num_groups * num_hidden).
         """
-        # initialize hidden and cell states
-        if self.hx is None:
-            zeros = torch.zeros(1, 1, self.hidden_size,
-                                dtype=input.dtype, device=input.device)
-            self.hx = zeros, zeros
-
-        # set some inter-group weights to zero with Dropout
-        weight_ih = self.dropout_ih(self.weight_ih_l0)
-        weight_hh = self.dropout_hh(self.weight_hh_l0)
-        flat_weights = [weight_ih, weight_hh, self.bias_ih_l0, self.bias_hh_l0]
-
-        # run LSTM on input and parameters
-        self.check_forward_args(input, self.hx)
-        result = nn._VF.lstm(input, self.hx, flat_weights, self.bias,
-                             self.num_layers, self.dropout, self.training,
-                             self.bidirectional, self.batch_first)
-        y, hidden = result[0], result[1:]
+        # run LSTM on input
+        y, hidden = self.lstm(input)
 
         # set or detach hidden and cell states for next iteration
         if keep_hidden:
@@ -464,17 +420,17 @@ class SubModel(nn.Module):
         fc         = [SplitLinear] fully-connected part of the submodel
     """
 
-    def __init__(self, num_groups, dropout):
+    def __init__(self, num_groups, inter_group_lr):
         """Initializes the submodel.
 
         Args:
-            num_groups = [int] number of store-item groups to make submodel for
-            dropout    = [float] probability of dropping inter-group weight
+            num_groups     = [int] number of store-item groups to make model for
+            inter_group_lr = [float] learning rate factor of inter-group weights
         """
         super(SubModel, self).__init__()
 
-        self.lstm = SplitLSTM(num_groups, dropout)
-        self.fc = SplitLinear(num_groups, dropout)
+        self.lstm = LSTM(num_groups, inter_group_lr)
+        self.fc = Linear(num_groups, inter_group_lr)
 
     def reset_hidden(self):
         """Resets the hidden state of the LSTM."""
@@ -521,17 +477,17 @@ class Model(nn.Module):
         device           = [torch.device] device to put the model and data on
     """
 
-    def __init__(self, num_models, device, dropout=1.0):
+    def __init__(self, num_models, device, inter_group_lr=0.0):
         """Initializes the model.
 
         Args:
-            num_models = [int] number of submodels to make
-            device     = [torch.device] device to put the models and data on
-            dropout    = [float] probability of dropping inter-group weight
+            num_models     = [int] number of submodels to make
+            device         = [torch.device] device to put the models and data on
+            inter_group_lr = [float] learning rate factor of inter-group weights
         """
-        super(Model, self).__init__()
-
         global num_groups
+
+        super(Model, self).__init__()
 
         min_model_groups = num_groups // num_models
         num_extra_groups = num_groups % num_models
@@ -541,7 +497,7 @@ class Model(nn.Module):
 
         self.submodels = nn.ModuleList()
         for num_model_groups in self.num_model_groups:
-            submodel = SubModel(num_model_groups, dropout).to(device)
+            submodel = SubModel(num_model_groups, inter_group_lr).to(device)
             self.submodels.append(submodel)
 
         self.device = device
