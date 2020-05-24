@@ -228,7 +228,7 @@ class Dropout:
         Returns [torch.Tensor]:
             Gradients, where on some of self.grad_idx, they are set to zero.
         """
-        sample = self.bernoulli.sample(self.sample_shape)
+        sample = self.bernoulli.sample(self.sample_shape).to(grad.device)
         grad[self.grad_idx] *= sample
 
         return grad
