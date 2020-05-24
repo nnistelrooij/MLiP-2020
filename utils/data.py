@@ -137,7 +137,7 @@ class ForecastDataset(Dataset):
         if self.horizon:
             return (len(self.sales) - 2) // self.seq_len
         else:
-            return len(self.prices) - 1
+            return len(self.prices) - 2
 
     def _get_train_item(self, idx):
         """Get input and target data during training or validation.
@@ -145,20 +145,26 @@ class ForecastDataset(Dataset):
         Each epoch, a different starting index is sampled to increase data
         diversity.
         The actual size of the returned arrays might not be exactly seq_len
-        and horizon, but since the model can handle an arbitrary sequence
+        and horizon + 1, but since the model can handle an arbitrary sequence
         length, that is not really a problem.
 
         Returns [[np.ndarray]*4]:
-            day   = input data constant per store-item of shape (seq_len, 29)
-            t_day = target data constant per store-item of shape (horizon, 29)
+            day   = input data constant per store-item group
+            targets_day = target data constant per store-item group
+                Shapes are (seq_len, 29), respectively (horizon + 1, 29)
+                with constituents:
+
                 weekdays  = one-hot vectors of shape (T, 7)
                 weeks     = integers in range [1, 53] of shape (T, 1)
                 monthdays = integers in range [1, 31] of shape (T, 1)
                 months    = one-hot vectors of shape (T, 12)
                 years     = one-hot vectors of shape (T, 3)
                 events    = one-hot vectors of shape (T, 5)
-            items   = input data unequal per store-item; shape (seq_len, N, 3)
-            t_items = target data unequal per store-item; shape (horizon, N, 3)
+            items   = input data different per store-item group
+            targets_items = target data different per store-item group
+                Shapes are (seq_len, 30490, 3), respectively
+                (horizon + 1, 30490, 3) with constituents:
+
                 snap      = booleans of shape (T, 30490)
                 prices    = floats of shape (T, 30490)
                 sales     = integers of shape (T, 30490)
@@ -195,39 +201,37 @@ class ForecastDataset(Dataset):
     def _get_inference_item(self, idx):
         """Get input data during inference.
 
-        If horizon = 0, i.e. inference mode, then sales may be empty, which
-        means that items may not contian sales. So then day and items
-        possibly without sales are returned
+        If horizon = 0, i.e. inference mode, then sales may be empty. So day,
+        items, and sales separately, are returned.
 
         Returns [[np.ndarray]*3]:
-            day   = data constant per store-item of shape (1, 32)
-                weekdays  = one-hot vector of shape (1, 7)
-                weeks     = integer in range [1, 53] of shape (1, 1)
-                monthdays = integer in range [1, 31] of shape (1, 1)
-                months    = one-hot vector of shape (1, 12)
-                years     = one-hot vector of shape (1, 6)
-                events    = one-hot vector of shape (1, 5)
-            items = data different per store-item of shape (1, 2, N) / (1, 3, N)
-                snap      = booleans of shape (1, N)
-                prices    = floats of shape (1, N)
-                sales     = unit sales of previous day of shape (|sales|, N),
-                    where 0 <= |sales| <= 1
+            day   = data constant per store-item group of shape (2, 29)
+                weekdays  = one-hot vector of shape (2, 7)
+                weeks     = integer in range [1, 53] of shape (2, 1)
+                monthdays = integer in range [1, 31] of shape (2, 1)
+                months    = one-hot vector of shape (2, 12)
+                years     = one-hot vector of shape (2, 3)
+                events    = one-hot vector of shape (2, 5)
+            items = data different per store-item group of shape (2, 30490, 2)
+                snap      = booleans of shape (2, 30490)
+                prices    = floats of shape (2, 30490)
+            sales = sales of previous days per store-item group
+                The shape is (T, 30490, 1), where 0 <= T <= 2.
         """
         # get data constant per store-item
-        day = self.day[np.newaxis, idx + 1]
+        day = self.day[idx + 1:idx + 3]
 
-        # stack only SNAP and prices data; sales has variable length
-        items = np.hstack((
-            self.snap[idx + 1:idx + 2].T,
-            self.prices[idx + 1:idx + 2].T,
-            self.sales[idx:idx + 1].T)
-        )[np.newaxis]
+        # stack only SNAP and prices data; sales may have different length
+        items = np.stack((
+            self.snap[idx + 1:idx + 3],
+            self.prices[idx + 1:idx + 3]),
+            axis=2
+        )
 
-        # normalize inputs to unit Gaussian distribution
-        day = (day - 1.4436644) / 6.093091
-        items = (items - 2.029751) / 3.42601
+        # get sales, which may be empty
+        sales = self.sales[idx:idx + 2, :, np.newaxis]
 
-        return day, items
+        return day, items, sales
 
     def __getitem__(self, idx):
         if self.horizon:  # training or validation mode
@@ -302,12 +306,6 @@ if __name__ == '__main__':
             'in Practice\\Competition 2\\project\\')
     calendar, prices, sales = data_frames(path)
 
-    # train_loader, val_loader = data_loaders(calendar, prices, sales, 28, 8, 5)
-
-    # calendar = pd.read_csv(path + 'calendar.csv')
-    # prices = pd.read_csv(path + 'sell_prices.csv')
-    # sales = pd.read_csv(path + 'sales_train_validation.csv').iloc[:, :-2]
-
     time = datetime.now()
     dataset = ForecastDataset(calendar, prices, sales, seq_len=8, horizon=5)
     print('Time to initialize dataset: ', datetime.now() - time)
@@ -321,7 +319,7 @@ if __name__ == '__main__':
     print('Time to retrieve data: ', datetime.now() - time)
 
     time = datetime.now()
-    dataset = ForecastDataset(calendar, prices, sales, seq_len=1, horizon=0)
+    dataset = ForecastDataset(calendar, prices, sales, seq_len=8, horizon=0)
     print('Time to initialize dataset: ', datetime.now() - time)
 
     loader = DataLoader(dataset)

@@ -3,65 +3,87 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from utils.data import ForecastDataset
+from utils.data import data_frames, ForecastDataset
 from nn import Model
 
 
 def infer(model, loader):
-    """Infer the unit sales with the model.
+    """Infer unit sales of next days with a trained model.
 
     Args:
-        model  = [nn.Module] trained model
-        loader = [DataLoader] dataloader with last year of available data
+        model       = [nn.Module] trained model
+        loader      = [DataLoader] DataLoader with last year of available data
 
     Returns [[torch.Tensor]*2]:
         validation = sales projections of next 28 days
-        evaluation = sales projects of next 28 days after validation
+        evaluation = sales projections of 28 days after validation days
     """
-    projections = []
-    for day, items in tqdm(loader):
-        if items.shape[2] == 2:  # use sales projections at end of data
-            projection = projections[-1].view(1, 1, 1, items.shape[-1])
-            items = torch.cat((items, projection.to('cpu')), dim=2)
+    # initialize projections as tensor
+    projections = torch.empty(len(loader), 30490)
 
-        y = model(day, items)
-        projections.append(y[:, 0])
-        
-    validation = torch.stack(projections[-56:-28], dim=1)
-    evaluation = torch.stack(projections[-28:], dim=1)
+    with torch.no_grad():
+        for i, (day, items, sales) in enumerate(tqdm(loader)):
+            # find missing sales in projections
+            start_idx = sales.shape[1] - 2 + i
+            projection = projections[start_idx:i]
+            projection = projection.view(1, projection.shape[0], 30490, 1)
+
+            # concatenate inputs
+            sales = torch.cat((sales, projection), dim=1)
+            items = torch.cat((items, sales), dim=-1)
+
+            # add new projections based on old projections
+            y = model(day[:, :1], items[:, :1], day[:, 1:], items[:, 1:])
+            projections[i] = y
+
+    # select validation and evaluation projections from all projections
+    validation = projections[-56:-28].T
+    evaluation = projections[-28:].T
 
     return validation, evaluation
 
 
 if __name__ == '__main__':
-    device = torch.device('cuda')
-    horizon = 5  # forecasting horizon
-    num_models = 1000
+    device = torch.device('cpu')
+    num_models = 300  # number of submodels
+    num_days = 365  # number of days prior the days with missing sales
 
-    model = Model(horizon, num_models, device, True)
-    # model.load_state_dict(torch.load('models/model.pt', map_location=device))
+    # initialize trained model on correct device
+    model = Model(num_models, device)
+    model.load_state_dict(torch.load('models/model.pt', map_location=device))
+    model.reset_hidden()
     model.eval()
 
-    path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning '
-            'in Practice\\Competition 2\\project\\')
-    calendar = pd.read_csv(path + r'\calendar.csv').iloc[-365:]
-    sales = pd.read_csv(path + r'\sales_train_validation.csv')
-    sales = pd.concat((sales.iloc[:, :6], sales.iloc[:, -365+28+28:]), axis=1)
-    sales = sales.sort_values(by=['store_id', 'item_id'])
-    prices = pd.read_csv(path + r'\sell_prices.csv')
+    path = ('D:/Users/Niels-laptop/Documents/2019-2020/Machine '
+            'Learning in Practice/Competition 2/project')
+    calendar, prices, sales = data_frames(path)
 
+    # get last 365 days of data plus the extra days
+    num_extra_days = calendar.shape[0] - (sales.shape[1] - 6)
+    calendar = calendar.iloc[-num_days - num_extra_days:]
+
+    # get last 365 days of sales data
+    sales = pd.concat((sales.iloc[:, :6], sales.iloc[:, -num_days:]), axis=1)
+    sales = sales.sort_values(by=['store_id', 'item_id'])
+    sales.index = range(sales.shape[0])
+
+    # make dataloader from data
     dataset = ForecastDataset(calendar, prices, sales, seq_len=1, horizon=0)
     loader = DataLoader(dataset)
 
+    # run model to get sales projections
     validation, evaluation = infer(model, loader)
-    columns = [f'F{i}' for i in range(1, 29)]
 
+    # add validation projections to DataFrame
+    columns = [f'F{i}' for i in range(1, 29)]
     validation = pd.DataFrame(validation.tolist(), columns=columns)
     validation = pd.concat((sales[['id']], validation), axis=1)
 
+    # add evaluation projections to DataFrame
+    eval_id_col = sales[['id']].applymap(lambda x: x[:-10] + 'evaluation')
     evaluation = pd.DataFrame(evaluation.tolist(), columns=columns)
-    eval_col = sales[['id']].applymap(lambda x: x[:-10] + 'evaluation')
-    evaluation = pd.concat((eval_col, evaluation), axis=1)
+    evaluation = pd.concat((eval_id_col, evaluation), axis=1)
 
+    # concatenate all projections and save to storage
     projections = pd.concat((validation, evaluation), axis=0)
     projections.to_csv('submission.csv', index=False)
