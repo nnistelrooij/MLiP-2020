@@ -212,7 +212,7 @@ class Dropout:
         """Initializes Dropout module.
 
         Args:
-            p        = [float] probability of setting a weight gradient to zero
+            p        = [torch.Tensor] prob to drop inter-group weight gradient
             grad_idx = [[torch.Tensor]*2] index arrays to apply Dropout to
         """
         self.grad_idx = grad_idx
@@ -228,7 +228,7 @@ class Dropout:
         Returns [torch.Tensor]:
             Gradients, where on some of self.grad_idx, they are set to zero.
         """
-        sample = self.bernoulli.sample(self.sample_shape).to(grad.device)
+        sample = self.bernoulli.sample(self.sample_shape)
         grad[self.grad_idx] *= sample
 
         return grad
@@ -252,7 +252,7 @@ class Linear(nn.Module):
 
         Args:
             num_groups = [int] number of store-item groups to make layer for
-            dropout    = [float] prob of dropping inter-group weight gradient
+            dropout    = [torch.Tensor] prob to drop inter-group weight gradient
         """
         global num_hidden
 
@@ -333,7 +333,7 @@ class LSTM(nn.Module):
 
         Args:
             num_groups = [int] number of store-item groups to make LSTM for
-            dropout    = [float] prob of dropping inter-group weight gradient
+            dropout    = [torch.Tensor] prob to drop inter-group weight gradient
         """
         global num_const
         global num_var
@@ -462,7 +462,7 @@ class SubModel(nn.Module):
 
         Args:
             num_groups = [int] number of store-item groups to make submodel for
-            dropout    = [float] prob of dropping inter-group weight gradient
+            dropout    = [torch.Tensor] prob to drop inter-group weight gradient
         """
         super(SubModel, self).__init__()
 
@@ -532,6 +532,7 @@ class Model(nn.Module):
         self.num_model_groups[:num_extra_groups] = min_model_groups + 1
         self.num_model_groups = self.num_model_groups.long().tolist()
 
+        dropout = torch.tensor(dropout).to(device)
         self.submodels = nn.ModuleList()
         for num_model_groups in self.num_model_groups:
             submodel = SubModel(num_model_groups, dropout).to(device)
