@@ -23,8 +23,8 @@ def handle_arguments():
                         help='number of days for validation, default: 28')
     parser.add_argument('-s', '--num_models', type=int, default=500,
                         help='number of submodels to make, default: 500')
-    parser.add_argument('-d', '--dropout', type=float, default=1.0,
-                        help='prob of zero inter-group weight, default: 1.0')
+    parser.add_argument('-l', '--inter_group_lr', type=float, default=0.0,
+                        help='LR factor of inter-group weights, default: 0.0')
     parser.add_argument('-e', '--epochs', type=int, default=50,
                         help='number of iters over training data, default: 50')
     parser.add_argument('-m', '--model', type=str, default='models/model.pt',
@@ -57,7 +57,8 @@ if __name__ == '__main__':
     print('DEVICE:', device)
 
     # initialize network and show summary
-    model = Model(args.num_models, device, args.dropout)
+    model = Model(args.num_models, device, args.inter_group_lr)
+
     # TensorBoard writers
     current_time = datetime.now().strftime("%Y-%m-%d/%H'%M'%S")
     train_writer = MetricWriter(f'runs/{current_time}/train')
