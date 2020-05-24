@@ -401,7 +401,7 @@ class LSTM(nn.Module):
             Output of shape (1, seq_len, num_groups * num_hidden).
         """
         # run LSTM on input
-        y, hidden = self.lstm(input)
+        y, hidden = self.lstm(input, self.hx)
 
         # set or detach hidden and cell states for next iteration
         if keep_hidden:
