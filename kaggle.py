@@ -11,30 +11,30 @@ def infer(model, loader):
     """Infer unit sales of next days with a trained model.
 
     Args:
-        model       = [nn.Module] trained model
-        loader      = [DataLoader] DataLoader with last year of available data
+        model  = [nn.Module] trained model
+        loader = [DataLoader] DataLoader with last year of available data
 
     Returns [[torch.Tensor]*2]:
         validation = sales projections of next 28 days
         evaluation = sales projections of 28 days after validation days
     """
     # initialize projections as tensor
-    projections = torch.empty(len(loader), 30490)
+    projections = torch.empty(len(loader), ForecastDataset.num_groups)
 
     with torch.no_grad():
         for i, (day, items, sales) in enumerate(tqdm(loader)):
             # find missing sales in projections
             start_idx = sales.shape[1] - 2 + i
             projection = projections[start_idx:i]
-            projection = projection.view(1, projection.shape[0], 30490, 1)
+            projection = projection[None, ..., None]
 
             # concatenate inputs
             sales = torch.cat((sales, projection), dim=1)
             items = torch.cat((items, sales), dim=-1)
 
             # add new projections based on old projections
-            y = model(day[:, :1], items[:, :1], day[:, 1:], items[:, 1:])
-            projections[i] = y
+            y = model(day[:, :1], day[:, 1:], items[:, :1], items[:, 1:])
+            projections[i] = y.cpu()
 
     # select validation and evaluation projections from all projections
     validation = projections[-56:-28].T
@@ -44,15 +44,9 @@ def infer(model, loader):
 
 
 if __name__ == '__main__':
-    device = torch.device('cpu')
-    num_models = 300  # number of submodels
+    device = torch.device('cuda')
+    num_models = 1500  # number of submodels
     num_days = 365  # number of days prior the days with missing sales
-
-    # initialize trained model on correct device
-    model = Model(num_models, device)
-    model.load_state_dict(torch.load('models/model.pt', map_location=device))
-    model.reset_hidden()
-    model.eval()
 
     path = ('D:/Users/Niels-laptop/Documents/2019-2020/Machine '
             'Learning in Practice/Competition 2/project')
@@ -64,12 +58,15 @@ if __name__ == '__main__':
 
     # get last 365 days of sales data
     sales = pd.concat((sales.iloc[:, :6], sales.iloc[:, -num_days:]), axis=1)
-    sales = sales.sort_values(by=['store_id', 'item_id'])
-    sales.index = range(sales.shape[0])
 
-    # make dataloader from data
-    dataset = ForecastDataset(calendar, prices, sales, seq_len=1, horizon=0)
-    loader = DataLoader(dataset)
+    # make DataLoader from inference data
+    loader = DataLoader(ForecastDataset(calendar, prices, sales, horizon=0))
+
+    # initialize trained model on correct device
+    model = Model(num_models, 0.99, device)
+    model.load_state_dict(torch.load('models/model.pt', map_location=device))
+    model.reset_hidden()
+    model.eval()
 
     # run model to get sales projections
     validation, evaluation = infer(model, loader)
