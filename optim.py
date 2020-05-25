@@ -112,33 +112,21 @@ def validate(model, val_loader, val_writer, criterion, epoch, num_days):
     # set model mode to evaluation
     model.eval()
 
-    # start iterator with actual sales from current day
-    num_days = ForecastDataset.start_idx + num_days
-    val_iter = iter(val_loader)
-    day, items, t_day, t_items = next(val_iter)
-    for _ in range(num_days):
-        day, items, t_day, t_items = next(val_iter)
+    # make tqdm iterator and go to current day
+    current_day = ForecastDataset.start_idx + num_days
+    val_iter = iter(tqdm(val_loader, desc=f'Validation Epoch {epoch}'))
+    for _ in range(current_day):
+        next(val_iter)
+
+    # initialize sales and targets tables to compute loss once
+    sales = torch.empty(0, 30490).to(model.device)
+    targets = torch.empty(0, 30490)
 
     with torch.no_grad():
-        # initialize sales and targets columns for current day
-        y = model(day, items, t_day[:, :-1], t_items[:, :-1])
-        sales = y
-        targets = t_items[0, 1:, :, 2]
-
-        # add sales and targets for current day
-        day, items, t_day, t_items = next(val_iter)
-        t_items[0, 0, :, 2] = sales[-1]
-
-        y = model(day, items, t_day[:, :-1], t_items[:, :-1])
-        sales = torch.cat((sales, y))
-        targets = torch.cat((targets, t_items[0, 1:, :, 2]))
-
-        val_iter = tqdm(val_iter, desc=f'Validation Epoch {epoch}',
-                        total=len(val_loader) - num_days - 2)
         for day, items, t_day, t_items in val_iter:
             # replace actual sales in items and t_items with projected sales
-            items[0, 0, :, 2] = sales[-2]
-            t_items[0, 0, :, 2] = sales[-1]
+            items[0, 0:len(sales) > 1, :, 2] = sales[-2:-1]
+            t_items[0, 0:len(sales) > 0, :, 2] = sales[-1:]
 
             # predict with sales projections from previous days
             y = model(day, items, t_day[:, :-1], t_items[:, :-1])

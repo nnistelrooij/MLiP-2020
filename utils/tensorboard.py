@@ -13,7 +13,7 @@ class MetricWriter(SummaryWriter):
     """
     num_days = 0
 
-    def __init__(self, log_dir, eval_freq=100):
+    def __init__(self, log_dir, eval_freq=14):
         """Initialize this class as subclass of SummaryWriter.
 
         Args:
