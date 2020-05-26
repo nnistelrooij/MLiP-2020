@@ -2,6 +2,7 @@ import argparse
 from datetime import datetime
 
 import torch
+from torch.optim import Adagrad
 
 from nn import Model, WRMSSE
 from optim import optimize, ReduceLROnPlateau
@@ -65,7 +66,7 @@ if __name__ == '__main__':
     val_writer = MetricWriter(f'runs/{current_time}/validation', eval_freq=1)
 
     # initialize optimizer, scheduler, and criterion
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = Adagrad(model.parameters(), lr=0.01)
     scheduler = ReduceLROnPlateau(val_writer, optimizer)
     criterion = WRMSSE(calendar, prices, sales, device)
 
