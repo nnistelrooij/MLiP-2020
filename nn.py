@@ -3,12 +3,12 @@ import pandas as pd
 import torch
 from torch.distributions.bernoulli import Bernoulli
 import torch.nn as nn
-from torchsummary import summary
+import torch.nn.functional as F
 
-num_const = 29
-num_var = 3
+from utils.data import ForecastDataset
+
+num_const = 20
 num_hidden = 5
-num_groups = 30490
 
 
 class WRMSSE(nn.Module):
@@ -35,8 +35,6 @@ class WRMSSE(nn.Module):
 
         self.device = device
 
-        sales = sales.sort_values(by=['store_id', 'item_id'])
-        sales.index = range(sales.shape[0])
         self.permutations, self.group_indices = self._indices(sales)
 
         self.scales = self._time_series_scales(sales)
@@ -336,13 +334,12 @@ class LSTM(nn.Module):
             dropout    = [torch.Tensor] prob to drop inter-group weight gradient
         """
         global num_const
-        global num_var
         global num_hidden
 
         super(LSTM, self).__init__()
 
         # initialize LSTM and hidden state of LSTM
-        input_size = num_const + num_var * num_groups
+        input_size = num_const + ForecastDataset.num_var * num_groups
         hidden_size = num_hidden * num_groups
         self.lstm = nn.LSTM(input_size, hidden_size, batch_first=True)
         self.hx = None
@@ -372,16 +369,15 @@ class LSTM(nn.Module):
             Index arrays for easily dropping inter-group weight gradients.
         """
         global num_const
-        global num_var
         global num_hidden
 
         row_indices = torch.arange(hidden_size * 4).view(-1, 1)
 
         col_ih_indices = []
-        for i in range(num_const, input_size, num_var):
+        for i in range(num_const, input_size, ForecastDataset.num_var):
             col_ih_index = torch.cat((
                 torch.arange(num_const, i),
-                torch.arange(i + num_var, input_size)
+                torch.arange(i + ForecastDataset.num_var, input_size)
             ))
             col_ih_indices.append(col_ih_index)
         col_ih_indices = torch.stack(col_ih_indices)
@@ -473,16 +469,16 @@ class SubModel(nn.Module):
         """Resets the hidden state of the LSTM."""
         self.lstm.reset_hidden()
 
-    def forward(self, day, items, t_day, t_items):
+    def forward(self, day, t_day, items, t_items):
         """Forward pass of the submodel.
 
         Args:
             day   = [torch.Tensor] inputs constant per store-item group
                 The shape should be (1, seq_len, num_const).
-            items = [torch.Tensor] inputs different per store-item group
-                The shape should be (1, seq_len, num_groups, num_var).
             t_day   = [torch.Tensor] targets different per store-item group
                 The shape should be (1, horizon, num_const).
+            items = [torch.Tensor] inputs different per store-item group
+                The shape should be (1, seq_len, num_groups, num_var).
             t_items = [torch.Tensor] targets different per store-item group
                 The shape should be (1, horizon, num_groups, num_var).
 
@@ -499,10 +495,10 @@ class SubModel(nn.Module):
         # run LSTM again on targets
         h = self.lstm(t_x, keep_hidden=False)
 
-        # run linear layer in batch mode on output of LSTM
-        y = self.fc(h.squeeze(0))
+        # run linear layer on output of LSTM
+        y = self.fc(h)
 
-        return y
+        return y.squeeze(0)
 
 
 class Model(nn.Module):
@@ -522,16 +518,21 @@ class Model(nn.Module):
             dropout    = [float] prob of dropping inter-group weight gradient
             device     = [torch.device] device to put the models and data on
         """
-        global num_groups
+        global num_const
 
         super(Model, self).__init__()
 
-        min_model_groups = num_groups // num_models
-        num_extra_groups = num_groups % num_models
+        # make linear layer for embeddings constant per store-item group
+        self.fc = nn.Linear(ForecastDataset.num_const, num_const).to(device)
+
+        # determine number of groups each submodel will model
+        min_model_groups = ForecastDataset.num_groups // num_models
+        num_extra_groups = ForecastDataset.num_groups % num_models
         self.num_model_groups = torch.full((num_models,), min_model_groups)
         self.num_model_groups[:num_extra_groups] = min_model_groups + 1
         self.num_model_groups = self.num_model_groups.long().tolist()
 
+        # initialize submodels as a ModuleList on the correct device
         dropout = torch.tensor(dropout).to(device)
         self.submodels = nn.ModuleList()
         for num_model_groups in self.num_model_groups:
@@ -545,7 +546,7 @@ class Model(nn.Module):
         for submodel in self.submodels:
             submodel.reset_hidden()
 
-    def forward(self, day, items, t_day, t_items):
+    def forward(self, day, t_day, items, t_items):
         """Forward pass of the model.
 
         items and t_items are split, such that each submodel receives the
@@ -555,24 +556,29 @@ class Model(nn.Module):
         Args:
             day   = [torch.Tensor] inputs constant per store-item group
                 The shape should be (1, seq_len, num_const).
-            items = [torch.Tensor] inputs different per store-item group
-                The shape should be (1, seq_len, num_groups, num_var).
             t_day   = [torch.Tensor] targets different per store-item group
                 The shape should be (1, horizon, num_const).
+            items = [torch.Tensor] inputs different per store-item group
+                The shape should be (1, seq_len, num_groups, num_var).
             t_items = [torch.Tensor] targets different per store-item group
                 The shape should be (1, horizon, num_groups, num_var).
 
         Returns [torch.Tensor]:
             Output of shape (horizon, num_groups)
         """
+        # put input on correct device and split for each submodel
         day = day.to(self.device)
-        items = items.to(self.device).split(self.num_model_groups, dim=-2)
         t_day = t_day.to(self.device)
+        items = items.to(self.device).split(self.num_model_groups, dim=-2)
         t_items = t_items.to(self.device).split(self.num_model_groups, dim=-2)
+
+        # get embeddings from data constant per store-item group
+        day = F.relu(self.fc(day))
+        t_day = F.relu(self.fc(t_day))
 
         y = []
         for submodel, items, t_items in zip(self.submodels, items, t_items):
-            sub_y = submodel(day, items, t_day, t_items)
+            sub_y = submodel(day, t_day, items, t_items)
             y.append(sub_y)
 
         return torch.cat(y, dim=-1)
