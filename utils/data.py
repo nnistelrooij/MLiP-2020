@@ -133,9 +133,6 @@ class ForecastDataset(Dataset):
     @staticmethod
     def _sell_prices(calendar, prices):
         """Sell prices for each store-item group of shape (days, 30490)."""
-        # sort prices on store-items
-        prices = prices.sort_values(by=['store_id', 'item_id'])
-
         # pivot prices table to wide format
         prices = prices.set_index(['store_id', 'item_id'])
         prices = prices.pivot(columns='wm_yr_wk')
@@ -275,9 +272,14 @@ def data_frames(path):
     """
     path = Path(path)
 
+    # load DataFrames from storage
     calendar = pd.read_csv(path / 'calendar.csv')
     prices = pd.read_csv(path / 'sell_prices.csv')
     sales = pd.read_csv(path / 'sales_train_validation.csv')
+
+    # sort data on lowest level of time series hierarchy
+    prices = prices.sort_values(by=['store_id', 'item_id'])
+    prices.index = range(prices.shape[0])
     sales = sales.sort_values(by=['store_id', 'item_id'])
     sales.index = range(sales.shape[0])
 

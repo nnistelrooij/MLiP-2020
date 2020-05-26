@@ -87,8 +87,6 @@ class WRMSSE(nn.Module):
         # create DataFrame with revenue data
         data = calendar.merge(sales)
         data = prices.merge(data)
-        data = data.sort_values(by=['store_id', 'item_id', 'd'])
-        data.index = range(data.shape[0])
         data['revenue'] = data['d_'] * data['sell_price']
 
         # determine group parameters from long format data
@@ -191,7 +189,7 @@ class WRMSSE(nn.Module):
         # compute WRMSSE loss
         squared_errors = (actual_sales - projected_sales)**2
         MSE = torch.sum(squared_errors, dim=1) / input.shape[0]
-        RMSSE = torch.sqrt(MSE / self.scales + 1e-18)
+        RMSSE = torch.sqrt(MSE / self.scales + 1e-18)  # numerical instability
         loss = torch.sum(self.weights * RMSSE)
 
         return loss
