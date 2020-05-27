@@ -223,7 +223,7 @@ class Dropout(nn.Module):
         self.bernoulli = Bernoulli(1 - p)
         self.sample = None
 
-    def __call__(self, input, new_sample):
+    def forward(self, input, new_sample):
         """Forward pass of Dropout module.
 
         Args:
