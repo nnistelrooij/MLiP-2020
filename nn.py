@@ -236,6 +236,7 @@ class Dropout:
             self.sample = self.bernoulli.sample(self.sample_shape)
 
         if input.requires_grad:  # weights
+            input = input.clone()
             with torch.no_grad():
                 input[self.weight_idx] *= self.sample / self.q
         else:  # gradients
