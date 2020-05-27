@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from utils.data import ForecastDataset
 
 num_const = 20
-num_hidden = 5
+num_hidden = 1
 
 
 class WRMSSE(nn.Module):
@@ -201,7 +201,7 @@ class Dropout(nn.Module):
     """Module to drop out weights and gradients on specific indices.
 
     Attributes:
-        q            = [float] prob of keeping inter-group weight or gradient
+        q            = [torch.Tensor] prob to keep inter-group weight or grad
         weight_idx   = [[torch.Tensor]*2] index arrays to apply Dropout to
         sample_shape = [torch.Size] shape of the inter-group weights subset
         bernoulli    = [Bernoulli] Bernoulli sample distribution
@@ -240,17 +240,17 @@ class Dropout(nn.Module):
 
         # one new sample per iteration
         if new_sample:
-            self.sample = self.bernoulli.sample(self.sample_shape)
+            self.sample = self.bernoulli.sample(self.sample_shape).bool()
 
         # drop out inter-group weights or gradients
-        input = input.clone()
-        input[self.weight_idx] *= self.sample
+        inter_group_out = input[self.weight_idx] * self.sample
+        out = input.index_put(self.weight_idx, inter_group_out)
 
         # adjust weights during training for consistency during validation
-        if input.requires_grad:
-            input[self.weight_idx] /= self.q
+        if out.requires_grad:
+            out[self.weight_idx] /= self.q
 
-        return input
+        return out
 
 
 class Linear(nn.Module):
@@ -473,6 +473,11 @@ class LSTM(nn.RNNBase):
         weight_ih = self.dropout_ih(self.weight_ih_l0, new_sample=keep_hidden)
         weight_hh = self.dropout_hh(self.weight_hh_l0, new_sample=keep_hidden)
         flat_weights = [weight_ih, weight_hh, self.bias_ih_l0, self.bias_hh_l0]
+
+        # flatten parameters to get rid of run-time warning
+        self._flat_weights = flat_weights
+        self.flatten_parameters()
+        self._flat_weights = None
 
         # run LSTM on input and parameters
         self.check_forward_args(input, self.hx)
