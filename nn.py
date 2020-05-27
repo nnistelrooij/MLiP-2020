@@ -225,7 +225,8 @@ class Dropout:
             Gradients, where on some of self.grad_idx, they are set to zero.
         """
         sample = self.bernoulli.sample(self.sample_shape)
-        grad[self.grad_idx] *= sample
+        inter_group_grad = grad[self.grad_idx] * sample
+        grad = grad.index_put(self.grad_idx, inter_group_grad)
 
         return grad
 
@@ -292,10 +293,7 @@ class Linear(nn.Module):
 
     def _hook(self, grad):
         """Backward hook to drop inter-group weight gradients."""
-        grad = grad.clone()
-        grad = self.dropout(grad)
-
-        return grad
+        return self.dropout(grad)
 
     def forward(self, input):
         """Forward pass of the linear layer.
@@ -399,17 +397,11 @@ class LSTM(nn.Module):
 
     def _ih_hook(self, grad):
         """Backward hook to drop input-hidden inter-group weight gradients."""
-        grad = grad.clone()
-        grad = self.dropout_ih(grad)
-
-        return grad
+        return self.dropout_ih(grad)
 
     def _hh_hook(self, grad):
         """Backward hook to drop hidden-hidden inter-group weight gradients."""
-        grad = grad.clone()
-        grad = self.dropout_hh(grad)
-
-        return grad
+        return self.dropout_hh(grad)
 
     def _detach_hidden(self):
         """Detach hidden state from computational graph for next iteration."""
@@ -447,8 +439,8 @@ class SubModel(nn.Module):
     """Class that implements LSTM network for subset of all store-item groups.
 
     Attributes:
-        lstm = [SplitLSTM] LSTM part of the submodel
-        fc   = [SplitLinear] fully-connected part of the submodel
+        lstm = [LSTM] LSTM part of the submodel
+        fc   = [Linear] fully-connected part of the submodel
     """
 
     def __init__(self, num_groups, dropout):
@@ -584,8 +576,6 @@ class Model(nn.Module):
 
 if __name__ == '__main__':
     from datetime import datetime
-
-    # model = Model(1500, torch.device('cpu'))
 
     linear = Linear(100, 0.5)
 
