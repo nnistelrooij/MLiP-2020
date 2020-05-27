@@ -197,7 +197,7 @@ class WRMSSE(nn.Module):
         return loss
 
 
-class Dropout:
+class Dropout(nn.Module):
     """Module to drop out weights and gradients on specific indices.
 
     Attributes:
@@ -215,6 +215,8 @@ class Dropout:
             p        = [torch.Tensor] prob to drop inter-group weight or grad
             weight_idx = [[torch.Tensor]*2] index arrays to apply Dropout to
         """
+        super(Dropout, self).__init__()
+
         self.q = 1 - p + 1e-18
         self.weight_idx = weight_idx
         self.sample_shape = weight_idx[1].shape
@@ -230,18 +232,23 @@ class Dropout:
 
         Returns [torch.Tensor]:
             Weights or gradients, where on some of the indices specified in
-            self.weight_idx, they are set to zero.
+            self.weight_idx, they are set to zero during training.
         """
+        # keep all weights when validating
+        if not self.training:
+            return input
+
+        # one new sample per iteration
         if new_sample:
             self.sample = self.bernoulli.sample(self.sample_shape)
 
-        if input.requires_grad:  # weights
-            input = input.clone()
-            with torch.no_grad():
-                input[self.weight_idx] *= self.sample / self.q
-        else:  # gradients
-            input = input.clone()
-            input[self.weight_idx] *= self.sample
+        # drop out inter-group weights or gradients
+        input = input.clone()
+        input[self.weight_idx] *= self.sample
+
+        # adjust weights during training for consistency during validation
+        if input.requires_grad:
+            input[self.weight_idx] /= self.q
 
         return input
 
