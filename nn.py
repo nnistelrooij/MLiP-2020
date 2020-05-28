@@ -475,7 +475,7 @@ class SubModel(nn.Module):
         Args:
             day   = [torch.Tensor] inputs constant per store-item group
                 The shape should be (1, seq_len, num_const).
-            t_day   = [torch.Tensor] targets different per store-item group
+            t_day   = [torch.Tensor] targets constant per store-item group
                 The shape should be (1, horizon, num_const).
             items = [torch.Tensor] inputs different per store-item group
                 The shape should be (1, seq_len, num_groups, num_var).
@@ -556,7 +556,7 @@ class Model(nn.Module):
         Args:
             day   = [torch.Tensor] inputs constant per store-item group
                 The shape should be (1, seq_len, num_const).
-            t_day   = [torch.Tensor] targets different per store-item group
+            t_day   = [torch.Tensor] targets constant per store-item group
                 The shape should be (1, horizon, num_const).
             items = [torch.Tensor] inputs different per store-item group
                 The shape should be (1, seq_len, num_groups, num_var).
