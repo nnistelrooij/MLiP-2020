@@ -224,9 +224,8 @@ class Dropout:
         Returns [torch.Tensor]:
             Gradients, where on some of self.grad_idx, they are set to zero.
         """
-        sample = self.bernoulli.sample(self.sample_shape)
-        inter_group_grad = grad[self.grad_idx] * sample
-        grad = grad.index_put(self.grad_idx, inter_group_grad)
+        grad = grad.clone()
+        grad[self.grad_idx] *= self.bernoulli.sample(self.sample_shape)
 
         return grad
 
@@ -465,7 +464,7 @@ class SubModel(nn.Module):
         Args:
             day   = [torch.Tensor] inputs constant per store-item group
                 The shape should be (1, seq_len, num_const).
-            t_day   = [torch.Tensor] targets different per store-item group
+            t_day   = [torch.Tensor] targets constant per store-item group
                 The shape should be (1, horizon, num_const).
             items = [torch.Tensor] inputs different per store-item group
                 The shape should be (1, seq_len, num_groups, num_var).
@@ -546,7 +545,7 @@ class Model(nn.Module):
         Args:
             day   = [torch.Tensor] inputs constant per store-item group
                 The shape should be (1, seq_len, num_const).
-            t_day   = [torch.Tensor] targets different per store-item group
+            t_day   = [torch.Tensor] targets constant per store-item group
                 The shape should be (1, horizon, num_const).
             items = [torch.Tensor] inputs different per store-item group
                 The shape should be (1, seq_len, num_groups, num_var).
