@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 
+from pathlib import Path
+
 from sklearn.model_selection import train_test_split
 
 import lightgbm as lgb
@@ -173,7 +175,17 @@ def features(df):
     return df
 
 
-def training_data(df):  
+def training_data(df):
+    """
+    Split data into features and labels for training.
+
+    Args:
+        df = [pd.DataFrame] pandas dataframe
+
+    Returns [(pd.DataFrame) * 2]:
+        X = training features
+        y = training labels
+    """
     drop_cols = ["id", "date", "sales", "d", "wm_yr_wk", "weekday"]
     keep_cols = df.columns[~df.columns.isin(drop_cols)]
 
@@ -184,6 +196,19 @@ def training_data(df):
 
 
 def lgb_dataset(calendar, prices, sales):
+    """
+    Make LightGBM training and validation datasets from preprocessed dataframes.  
+    NOTE: preprocessed means that categorical features have been converted to integers. 
+
+    Args:
+        calendar = [pd.DataFrame] dates of product sales
+        prices   = [pd.DataFrame] price of the products sold per store and date
+        sales    = [pd.DataFrame] historical daily unit sales data per product and store 
+
+    Returns [lgb.Dataset]:
+        train_set = LightGBM training dataset
+        val_set = LightGBM validation dataset
+    """
     df = melt_and_merge(calendar, prices, sales)
     df = features(df)
     
@@ -202,6 +227,27 @@ def lgb_dataset(calendar, prices, sales):
                           categorical_feature=cat_features)
 
     return train_set, val_set
+
+
+def data_frames(path):
+    """
+    Load the data from storage into pd.DataFrame objects.
+
+    Args:
+        path = [str] path to folder with competition data
+
+    Returns [(pd.DataFrame)*3]:
+        calendar = [pd.DataFrame] dates of product sales
+        prices   = [pd.DataFrame] price of the products sold per store and date
+        sales    = [pd.DataFrame] historical daily unit sales data per product and store 
+    """
+    path = Path(path)
+
+    calendar = pd.read_csv(path / 'calendar.csv')
+    prices = pd.read_csv(path / 'sell_prices.csv')
+    sales = pd.read_csv(path / 'sales_train_validation.csv')
+
+    return calendar, prices, sales
 
 
 if __name__ == "__main__":
