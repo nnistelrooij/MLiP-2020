@@ -47,6 +47,7 @@ if __name__ == '__main__':
     device = torch.device('cuda')
     num_models = 1500  # number of submodels
     num_days = 365  # number of days prior the days with missing sales
+    num_hidden = 5  # number of hidden units per store-item group
 
     path = ('D:/Users/Niels-laptop/Documents/2019-2020/Machine '
             'Learning in Practice/Competition 2/project')
@@ -63,7 +64,7 @@ if __name__ == '__main__':
     loader = DataLoader(ForecastDataset(calendar, prices, sales, horizon=0))
 
     # initialize trained model on correct device
-    model = Model(num_models, 0.99, device)
+    model = Model(num_models, num_hidden, 0.99, device)
     model.load_state_dict(torch.load('models/model.pt', map_location=device))
     model.reset_hidden()
     model.eval()

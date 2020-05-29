@@ -68,12 +68,12 @@ class ForecastDataset(Dataset):
 
     @staticmethod
     def _weeks(calendar):
-        """One-hot representations of week numbers of shape (days, 1)."""
+        """Vector of week numbers of shape (days, 1)."""
         return calendar[['wm_yr_wk']].apply(lambda x: x % 100)
 
     @staticmethod
     def _monthdays(calendar):
-        """One-hot representations of month days of shape (days, 1)."""
+        """Vector of month days of shape (days, 1)."""
         return calendar[['date']].applymap(lambda x: x[-2:])
 
     @staticmethod
@@ -158,12 +158,12 @@ class ForecastDataset(Dataset):
         Returns [[np.ndarray]*4]:
             day   = input data constant per store-item group
             targets_day = target data constant per store-item group
-                Shapes are (seq_len, 114), respectively
-                (horizon + 1, 114) with constituents:
+                Shapes are (seq_len, 32), respectively
+                (horizon + 1, 32) with constituents:
 
                 weekdays  = one-hot vectors of shape (T, 7)
-                weeks     = one-hot vectors of shape (T, 53)
-                monthdays = one-hot vectors of shape (T, 31)
+                weeks     = vector of shape (T, 1)
+                monthdays = vector of shape (T, 1)
                 months    = one-hot vectors of shape (T, 12)
                 years     = one-hot vectors of shape (T, 6)
                 events    = one-hot vectors of shape (T, 5)
@@ -212,10 +212,10 @@ class ForecastDataset(Dataset):
         items, and sales separately, are returned.
 
         Returns [[np.ndarray]*3]:
-            day   = data constant per store-item group of shape (2, 114)
+            day   = data constant per store-item group of shape (2, 32)
                 weekdays  = one-hot vector of shape (2, 7)
-                weeks     = one-hot vectors of shape (2, 53)
-                monthdays = one-hot vectors of shape (2, 31)
+                weeks     = vector of shape (2, 1)
+                monthdays = vector of shape (2, 1)
                 months    = one-hot vector of shape (2, 12)
                 years     = one-hot vector of shape (2, 6)
                 events    = one-hot vector of shape (2, 5)
