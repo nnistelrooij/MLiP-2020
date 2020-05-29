@@ -3,12 +3,8 @@ import pandas as pd
 import torch
 from torch.distributions.bernoulli import Bernoulli
 import torch.nn as nn
-import torch.nn.functional as F
 
-from utils.data import ForecastDataset
-
-num_const = 20
-num_hidden = 5
+from utils.data import ForecastDataset as FD
 
 
 class WRMSSE(nn.Module):
@@ -243,15 +239,14 @@ class Linear(nn.Module):
         dropout = [Dropout] drops inter-group weight gradients
     """
 
-    def __init__(self, num_groups, dropout):
+    def __init__(self, num_groups, num_hidden, dropout):
         """Initializes linear layer for multiple groups.
 
         Args:
             num_groups = [int] number of store-item groups to make layer for
+            num_hidden = [int] number of hidden units per store-item group
             dropout    = [torch.Tensor] prob to drop inter-group weight gradient
         """
-        global num_hidden
-
         super(Linear, self).__init__()
 
         # initialize fully-connected layer
@@ -260,23 +255,22 @@ class Linear(nn.Module):
         self.linear = nn.Linear(in_features, out_features)
 
         # register Dropout backward hook
-        grad_idx = self._grad_indices(in_features, out_features)
+        grad_idx = self._grad_indices(num_hidden, in_features, out_features)
         self.dropout = Dropout(p=dropout, grad_idx=grad_idx)
         self.linear.weight.register_hook(self._hook)
 
     @staticmethod
-    def _grad_indices(in_features, out_features):
+    def _grad_indices(num_hidden, in_features, out_features):
         """Compute index arrays of inter-group weight gradients.
 
         Args:
+            num_hidden   = [int] number of hidden units per store-item group
             in_features  = [int] total number of inputs
             out_features = [int] total number of outputs
 
         Returns [[torch.Tensor]*2]:
             Index arrays for easily dropping inter-group weight gradients.
         """
-        global num_hidden
-
         row_indices = torch.arange(out_features).view(-1, 1)
 
         col_indices = []
@@ -321,28 +315,26 @@ class LSTM(nn.Module):
         dropout_hh = [Dropout] drops hidden-hidden inter-group weight gradients
     """
 
-    def __init__(self, num_groups, dropout):
+    def __init__(self, num_groups, num_hidden, dropout):
         """Initializes LSTM for multiple groups.
 
         Args:
             num_groups = [int] number of store-item groups to make LSTM for
+            num_hidden = [int] number of hidden units per store-item group
             dropout    = [torch.Tensor] prob to drop inter-group weight gradient
         """
-        global num_const
-        global num_hidden
-
         super(LSTM, self).__init__()
 
         # initialize LSTM and hidden state of LSTM
-        input_size = num_const + ForecastDataset.num_var * num_groups
+        input_size = FD.num_const + FD.num_var * num_groups
         hidden_size = num_hidden * num_groups
         self.lstm = nn.LSTM(input_size, hidden_size, batch_first=True)
         self.hx = None
 
         # compute index arrays and initialize Dropout modules
-        grad_ih_idx, grad_hh_idx = self._grad_indices(input_size, hidden_size)
-        self.dropout_ih = Dropout(p=dropout, grad_idx=grad_ih_idx)
-        self.dropout_hh = Dropout(p=dropout, grad_idx=grad_hh_idx)
+        grad_indices = self._grad_indices(num_hidden, input_size, hidden_size)
+        self.dropout_ih = Dropout(p=dropout, grad_idx=grad_indices[0])
+        self.dropout_hh = Dropout(p=dropout, grad_idx=grad_indices[1])
 
         # register input-hidden and hidden-hidden backward hooks
         self.lstm.weight_ih_l0.register_hook(self._ih_hook)
@@ -353,26 +345,24 @@ class LSTM(nn.Module):
         self.hx = None
 
     @staticmethod
-    def _grad_indices(input_size, hidden_size):
+    def _grad_indices(num_hidden, input_size, hidden_size):
         """Compute index arrays of inter-group weight gradients.
 
         Args:
+            num_hidden  = [int] number of hidden units per store-item group
             input_size  = [int] total number of inputs
             hidden_size = [int] total number of hidden units
 
         Returns [[[torch.Tensor]*2]*2]:
             Index arrays for easily dropping inter-group weight gradients.
         """
-        global num_const
-        global num_hidden
-
         row_indices = torch.arange(hidden_size * 4).view(-1, 1)
 
         col_ih_indices = []
-        for i in range(num_const, input_size, ForecastDataset.num_var):
+        for i in range(FD.num_const, input_size, FD.num_var):
             col_ih_index = torch.cat((
-                torch.arange(num_const, i),
-                torch.arange(i + ForecastDataset.num_var, input_size)
+                torch.arange(FD.num_const, i),
+                torch.arange(i + FD.num_var, input_size)
             ))
             col_ih_indices.append(col_ih_index)
         col_ih_indices = torch.stack(col_ih_indices)
@@ -442,17 +432,18 @@ class SubModel(nn.Module):
         fc   = [Linear] fully-connected part of the submodel
     """
 
-    def __init__(self, num_groups, dropout):
+    def __init__(self, num_groups, num_hidden, dropout):
         """Initializes the submodel.
 
         Args:
             num_groups = [int] number of store-item groups to make submodel for
+            num_hidden = [int] number of hidden units per store-item group
             dropout    = [torch.Tensor] prob to drop inter-group weight gradient
         """
         super(SubModel, self).__init__()
 
-        self.lstm = LSTM(num_groups, dropout)
-        self.fc = Linear(num_groups, dropout)
+        self.lstm = LSTM(num_groups, num_hidden, dropout)
+        self.fc = Linear(num_groups, num_hidden, dropout)
 
     def reset_hidden(self):
         """Resets the hidden state of the LSTM."""
@@ -499,24 +490,20 @@ class Model(nn.Module):
         device           = [torch.device] device to put the model and data on
     """
 
-    def __init__(self, num_models, dropout, device):
+    def __init__(self, num_models, num_hidden, dropout, device):
         """Initializes the model.
 
         Args:
             num_models = [int] number of submodels to make
+            num_hidden = [int] number of hidden units per store-item group
             dropout    = [float] prob of dropping inter-group weight gradient
             device     = [torch.device] device to put the models and data on
         """
-        global num_const
-
         super(Model, self).__init__()
 
-        # make linear layer for embeddings constant per store-item group
-        self.fc = nn.Linear(ForecastDataset.num_const, num_const).to(device)
-
         # determine number of groups each submodel will model
-        min_model_groups = ForecastDataset.num_groups // num_models
-        num_extra_groups = ForecastDataset.num_groups % num_models
+        min_model_groups = FD.num_groups // num_models
+        num_extra_groups = FD.num_groups % num_models
         self.num_model_groups = torch.full((num_models,), min_model_groups)
         self.num_model_groups[:num_extra_groups] = min_model_groups + 1
         self.num_model_groups = self.num_model_groups.long().tolist()
@@ -524,8 +511,8 @@ class Model(nn.Module):
         # initialize submodels as a ModuleList on the correct device
         dropout = torch.tensor(dropout).to(device)
         self.submodels = nn.ModuleList()
-        for num_model_groups in self.num_model_groups:
-            submodel = SubModel(num_model_groups, dropout).to(device)
+        for num_groups in self.num_model_groups:
+            submodel = SubModel(num_groups, num_hidden, dropout).to(device)
             self.submodels.append(submodel)
 
         self.device = device
@@ -560,10 +547,6 @@ class Model(nn.Module):
         t_day = t_day.to(self.device)
         items = items.to(self.device).split(self.num_model_groups, dim=-2)
         t_items = t_items.to(self.device).split(self.num_model_groups, dim=-2)
-
-        # get embeddings from data constant per store-item group
-        day = F.relu(self.fc(day))
-        t_day = F.relu(self.fc(t_day))
 
         y = []
         for submodel, items, t_items in zip(self.submodels, items, t_items):

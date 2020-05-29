@@ -40,16 +40,15 @@ class ForecastDataset(Dataset):
         super(Dataset, self).__init__()
 
         # get data constant per store-item in one array
-        self.day = (
+        self.day = np.concatenate((
             self._weekdays(calendar),
             self._weeks(calendar),
             self._monthdays(calendar),
             self._months(calendar),
             self._years(calendar),
-            self._event_types(calendar)
-        )
-        self.day = tuple(map(self._normalize, self.day))
-        self.day = np.concatenate(self.day, axis=1).astype(np.float32)
+            self._event_types(calendar)),
+            axis=1
+        ).astype(np.float32)
 
         # get data different per store-item
         self.snap = self._snap(calendar, sales)
@@ -63,30 +62,19 @@ class ForecastDataset(Dataset):
         self.horizon = horizon
 
     @staticmethod
-    def _normalize(input):
-        """Normalizes one-hot vectors to z-scores."""
-        num_classes = input.shape[1]
-
-        mean = 1 / num_classes
-        std = math.sqrt((num_classes - 1) * mean**2)
-
-        return (input - mean) / std
-
-    @staticmethod
     def _weekdays(calendar):
         """One-hot representations of weekdays of shape (days, 7)."""
         return pd.RangeIndex(1, 8) == calendar[['wday']]
 
     @staticmethod
     def _weeks(calendar):
-        """One-hot representations of week numbers of shape (days, 53)."""
-        return pd.RangeIndex(1, 54) == (calendar[['wm_yr_wk']] % 100)
+        """One-hot representations of week numbers of shape (days, 1)."""
+        return calendar[['wm_yr_wk']].apply(lambda x: x % 100)
 
     @staticmethod
     def _monthdays(calendar):
-        """One-hot representations of month days of shape (days, 31)."""
-        monthdays = calendar[['date']].applymap(lambda x: int(x[-2:]))
-        return pd.RangeIndex(1, 32) == monthdays
+        """One-hot representations of month days of shape (days, 1)."""
+        return calendar[['date']].applymap(lambda x: x[-2:])
 
     @staticmethod
     def _months(calendar):

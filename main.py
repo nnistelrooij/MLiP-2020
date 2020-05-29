@@ -30,6 +30,8 @@ def handle_arguments():
                         help='number of iters over training data, default: 50')
     parser.add_argument('-m', '--model', type=str, default='models/model.pt',
                         help='path to save model, default: "models/model.pt"')
+    parser.add_argument('-h', '--num_hidden', type=int, default=5,
+                        help='hidden units per store-item group, default: 5')
 
     # parse and print arguments
     args = parser.parse_args()
@@ -58,7 +60,7 @@ if __name__ == '__main__':
     print('DEVICE:', device)
 
     # initialize network and show summary
-    model = Model(args.num_models, args.dropout, device)
+    model = Model(args.num_models, args.num_hidden, args.dropout, device)
 
     # TensorBoard writers
     current_time = datetime.now().strftime("%Y-%m-%d/%H'%M'%S")
