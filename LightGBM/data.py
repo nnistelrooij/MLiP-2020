@@ -1,10 +1,19 @@
 import numpy as np
 import pandas as pd
 
+from sklearn.model_selection import train_test_split
+
+import lightgbm as lgb
+
+
+# Global constants
+LAST_DAY = 1913
+MAX_LAG = 57
+
 
 def downcast(df, verbose=False):
     """
-    Downcast the data to reduce memory usage.
+    Downcast the data to reduce memory usage.  
     Adapted from: https://www.kaggle.com/ragnar123/very-fst-model
 
     Args:
@@ -40,7 +49,8 @@ def downcast(df, verbose=False):
 
     end_mem = df.memory_usage().sum() / 1024**2
     if verbose: 
-        print('Mem. usage decreased to {:5.2f} Mb ({:.1f}% reduction)'.format(end_mem, 100 * (start_mem - end_mem) / start_mem))
+        print('Mem. usage decreased to {:5.2f} Mb ({:.1f}% reduction)' \
+                .format(end_mem, 100 * (start_mem - end_mem) / start_mem))
     return df
 
 
@@ -75,10 +85,10 @@ def optimize_df(calendar, prices, sales, days=None, verbose=False):
         verbose  = [boolean] if True, print memory reduction
 
     Returns [(pd.DataFrame) * 3]
-        Optimized dataframes.s
+        Optimized dataframes.
     """
-    assert days > 56, "Minimum days is 57."
-    assert days < 1914, "Maximum days is 1913."
+    assert days > 56, f"Minimum days is {MAX_LAG}."
+    assert days < LAST_DAY + 1, f"Maximum days is {LAST_DAY}."
     calendar['date'] = pd.to_datetime(calendar['date'], format='%Y-%m-%d')
 
     if days:
@@ -91,13 +101,46 @@ def optimize_df(calendar, prices, sales, days=None, verbose=False):
     return calendar, prices, sales
 
 
+def melt_and_merge(calendar, prices, sales, submission=False):
+    """
+    Convert sales from wide to long format, and merge sales with
+    calendar and prices to create one dataframe.
+
+    Args:
+        calendar = [pd.DataFrame] dates of product sales
+        prices   = [pd.DataFrame] price of the products sold per store and date
+        sales    = [pd.DataFrame] historical daily unit sales data per product and store 
+
+    Returns [pd.DataFrame]:
+        Merged long format dataframe
+    """
+    id_cols = ['id', 'item_id', 'dept_id','store_id', 'cat_id', 'state_id']
+    if submission:
+        sales.drop(sales.columns[6:-MAX_LAG], axis=1, inplace=True)
+        for day in range(LAST_DAY + 1, LAST_DAY + 28 + 1):
+            sales[f"d_{day}"] = np.nan
+
+    df = pd.melt(sales,
+                id_vars = id_cols,
+                var_name = 'd',
+                value_name = 'sales')
+
+    df = df.merge(calendar, on = 'd', copy = False)
+    df = df.merge(prices, on = ['store_id', 'item_id', 'wm_yr_wk'], copy = False)
+
+    return df
+
+
 def features(df):
     """
     Create features.
     Adapted from: https://www.kaggle.com/kneroma/m5-first-public-notebook-under-0-50
 
     Args:
-        df = [pd.DataFrame] wide format dataframe
+        df = [pd.DataFrame] long format dataframe
+
+    Returns [pd.DataFrame]:
+        dataframe with created features
     """
     lags = [7, 28]
     lag_cols = [f"lag_{lag}" for lag in lags]
@@ -107,7 +150,9 @@ def features(df):
     windows = [7, 28]
     for window in windows :
         for lag,lag_col in zip(lags, lag_cols):
-            df[f"rmean_{lag}_{window}"] = df[["id", lag_col]].groupby("id")[lag_col].transform(lambda x: x.rolling(window).mean())
+            df[f"rmean_{lag}_{window}"] = df[["id", lag_col]] \
+                .groupby("id")[lag_col] \
+                .transform(lambda x: x.rolling(window).mean())
 
     date_features = {
                      "wday": "weekday",
@@ -123,6 +168,40 @@ def features(df):
             df[name] = df[name].astype("int16")
         else:
             df[name] = getattr(df["date"].dt, attribute).astype("int16")
+
+    df.dropna(inplace = True)
+    return df
+
+
+def training_data(df):  
+    drop_cols = ["id", "date", "sales", "d", "wm_yr_wk", "weekday"]
+    keep_cols = df.columns[~df.columns.isin(drop_cols)]
+
+    X = df[keep_cols]
+    y = df["sales"]
+
+    return X, y
+
+
+def lgb_dataset(calendar, prices, sales):
+    df = melt_and_merge(calendar, prices, sales)
+    df = features(df)
+    
+    X, y = training_data(df)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.20, random_state=0)
+
+    cat_features = ['item_id', 'dept_id', 'store_id', 'cat_id', 'state_id'] + \
+                   ['event_name_1', 'event_name_2', 'event_type_1', 'event_type_2']
+
+    train_set = lgb.Dataset(X_train, 
+                            label=y_train, 
+                            categorical_feature=cat_features)
+
+    val_set = lgb.Dataset(X_test, 
+                          label=y_test,
+                          categorical_feature=cat_features)
+
+    return train_set, val_set
 
 
 if __name__ == "__main__":
