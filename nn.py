@@ -3,12 +3,8 @@ import pandas as pd
 import torch
 from torch.distributions.bernoulli import Bernoulli
 import torch.nn as nn
-from torchsummary import summary
 
-num_const = 29
-num_var = 3
-num_hidden = 5
-num_groups = 30490
+from utils.data import ForecastDataset as FD
 
 
 class WRMSSE(nn.Module):
@@ -35,8 +31,6 @@ class WRMSSE(nn.Module):
 
         self.device = device
 
-        sales = sales.sort_values(by=['store_id', 'item_id'])
-        sales.index = range(sales.shape[0])
         self.permutations, self.group_indices = self._indices(sales)
 
         self.scales = self._time_series_scales(sales)
@@ -89,8 +83,6 @@ class WRMSSE(nn.Module):
         # create DataFrame with revenue data
         data = calendar.merge(sales)
         data = prices.merge(data)
-        data = data.sort_values(by=['store_id', 'item_id', 'd'])
-        data.index = range(data.shape[0])
         data['revenue'] = data['d_'] * data['sell_price']
 
         # determine group parameters from long format data
@@ -193,7 +185,7 @@ class WRMSSE(nn.Module):
         # compute WRMSSE loss
         squared_errors = (actual_sales - projected_sales)**2
         MSE = torch.sum(squared_errors, dim=1) / input.shape[0]
-        RMSSE = torch.sqrt(MSE / self.scales + 1e-18)
+        RMSSE = torch.sqrt(MSE / self.scales + 1e-18)  # numerical instability
         loss = torch.sum(self.weights * RMSSE)
 
         return loss
@@ -228,8 +220,8 @@ class Dropout:
         Returns [torch.Tensor]:
             Gradients, where on some of self.grad_idx, they are set to zero.
         """
-        sample = self.bernoulli.sample(self.sample_shape)
-        grad[self.grad_idx] *= sample
+        grad = grad.clone()
+        grad[self.grad_idx] *= self.bernoulli.sample(self.sample_shape)
 
         return grad
 
@@ -247,15 +239,14 @@ class Linear(nn.Module):
         dropout = [Dropout] drops inter-group weight gradients
     """
 
-    def __init__(self, num_groups, dropout):
+    def __init__(self, num_groups, num_hidden, dropout):
         """Initializes linear layer for multiple groups.
 
         Args:
             num_groups = [int] number of store-item groups to make layer for
+            num_hidden = [int] number of hidden units per store-item group
             dropout    = [torch.Tensor] prob to drop inter-group weight gradient
         """
-        global num_hidden
-
         super(Linear, self).__init__()
 
         # initialize fully-connected layer
@@ -264,23 +255,22 @@ class Linear(nn.Module):
         self.linear = nn.Linear(in_features, out_features)
 
         # register Dropout backward hook
-        grad_idx = self._grad_indices(in_features, out_features)
+        grad_idx = self._grad_indices(num_hidden, in_features, out_features)
         self.dropout = Dropout(p=dropout, grad_idx=grad_idx)
         self.linear.weight.register_hook(self._hook)
 
     @staticmethod
-    def _grad_indices(in_features, out_features):
+    def _grad_indices(num_hidden, in_features, out_features):
         """Compute index arrays of inter-group weight gradients.
 
         Args:
+            num_hidden   = [int] number of hidden units per store-item group
             in_features  = [int] total number of inputs
             out_features = [int] total number of outputs
 
         Returns [[torch.Tensor]*2]:
             Index arrays for easily dropping inter-group weight gradients.
         """
-        global num_hidden
-
         row_indices = torch.arange(out_features).view(-1, 1)
 
         col_indices = []
@@ -296,10 +286,7 @@ class Linear(nn.Module):
 
     def _hook(self, grad):
         """Backward hook to drop inter-group weight gradients."""
-        grad = grad.clone()
-        grad = self.dropout(grad)
-
-        return grad
+        return self.dropout(grad)
 
     def forward(self, input):
         """Forward pass of the linear layer.
@@ -328,29 +315,26 @@ class LSTM(nn.Module):
         dropout_hh = [Dropout] drops hidden-hidden inter-group weight gradients
     """
 
-    def __init__(self, num_groups, dropout):
+    def __init__(self, num_groups, num_hidden, dropout):
         """Initializes LSTM for multiple groups.
 
         Args:
             num_groups = [int] number of store-item groups to make LSTM for
+            num_hidden = [int] number of hidden units per store-item group
             dropout    = [torch.Tensor] prob to drop inter-group weight gradient
         """
-        global num_const
-        global num_var
-        global num_hidden
-
         super(LSTM, self).__init__()
 
         # initialize LSTM and hidden state of LSTM
-        input_size = num_const + num_var * num_groups
+        input_size = FD.num_const + FD.num_var * num_groups
         hidden_size = num_hidden * num_groups
         self.lstm = nn.LSTM(input_size, hidden_size, batch_first=True)
         self.hx = None
 
         # compute index arrays and initialize Dropout modules
-        grad_ih_idx, grad_hh_idx = self._grad_indices(input_size, hidden_size)
-        self.dropout_ih = Dropout(p=dropout, grad_idx=grad_ih_idx)
-        self.dropout_hh = Dropout(p=dropout, grad_idx=grad_hh_idx)
+        grad_indices = self._grad_indices(num_hidden, input_size, hidden_size)
+        self.dropout_ih = Dropout(p=dropout, grad_idx=grad_indices[0])
+        self.dropout_hh = Dropout(p=dropout, grad_idx=grad_indices[1])
 
         # register input-hidden and hidden-hidden backward hooks
         self.lstm.weight_ih_l0.register_hook(self._ih_hook)
@@ -361,27 +345,24 @@ class LSTM(nn.Module):
         self.hx = None
 
     @staticmethod
-    def _grad_indices(input_size, hidden_size):
+    def _grad_indices(num_hidden, input_size, hidden_size):
         """Compute index arrays of inter-group weight gradients.
 
         Args:
+            num_hidden  = [int] number of hidden units per store-item group
             input_size  = [int] total number of inputs
             hidden_size = [int] total number of hidden units
 
         Returns [[[torch.Tensor]*2]*2]:
             Index arrays for easily dropping inter-group weight gradients.
         """
-        global num_const
-        global num_var
-        global num_hidden
-
         row_indices = torch.arange(hidden_size * 4).view(-1, 1)
 
         col_ih_indices = []
-        for i in range(num_const, input_size, num_var):
+        for i in range(FD.num_const, input_size, FD.num_var):
             col_ih_index = torch.cat((
-                torch.arange(num_const, i),
-                torch.arange(i + num_var, input_size)
+                torch.arange(FD.num_const, i),
+                torch.arange(i + FD.num_var, input_size)
             ))
             col_ih_indices.append(col_ih_index)
         col_ih_indices = torch.stack(col_ih_indices)
@@ -405,17 +386,11 @@ class LSTM(nn.Module):
 
     def _ih_hook(self, grad):
         """Backward hook to drop input-hidden inter-group weight gradients."""
-        grad = grad.clone()
-        grad = self.dropout_ih(grad)
-
-        return grad
+        return self.dropout_ih(grad)
 
     def _hh_hook(self, grad):
         """Backward hook to drop hidden-hidden inter-group weight gradients."""
-        grad = grad.clone()
-        grad = self.dropout_hh(grad)
-
-        return grad
+        return self.dropout_hh(grad)
 
     def _detach_hidden(self):
         """Detach hidden state from computational graph for next iteration."""
@@ -453,36 +428,37 @@ class SubModel(nn.Module):
     """Class that implements LSTM network for subset of all store-item groups.
 
     Attributes:
-        lstm = [SplitLSTM] LSTM part of the submodel
-        fc   = [SplitLinear] fully-connected part of the submodel
+        lstm = [LSTM] LSTM part of the submodel
+        fc   = [Linear] fully-connected part of the submodel
     """
 
-    def __init__(self, num_groups, dropout):
+    def __init__(self, num_groups, num_hidden, dropout):
         """Initializes the submodel.
 
         Args:
             num_groups = [int] number of store-item groups to make submodel for
+            num_hidden = [int] number of hidden units per store-item group
             dropout    = [torch.Tensor] prob to drop inter-group weight gradient
         """
         super(SubModel, self).__init__()
 
-        self.lstm = LSTM(num_groups, dropout)
-        self.fc = Linear(num_groups, dropout)
+        self.lstm = LSTM(num_groups, num_hidden, dropout)
+        self.fc = Linear(num_groups, num_hidden, dropout)
 
     def reset_hidden(self):
         """Resets the hidden state of the LSTM."""
         self.lstm.reset_hidden()
 
-    def forward(self, day, items, t_day, t_items):
+    def forward(self, day, t_day, items, t_items):
         """Forward pass of the submodel.
 
         Args:
             day   = [torch.Tensor] inputs constant per store-item group
                 The shape should be (1, seq_len, num_const).
+            t_day   = [torch.Tensor] targets constant per store-item group
+                The shape should be (1, horizon, num_const).
             items = [torch.Tensor] inputs different per store-item group
                 The shape should be (1, seq_len, num_groups, num_var).
-            t_day   = [torch.Tensor] targets different per store-item group
-                The shape should be (1, horizon, num_const).
             t_items = [torch.Tensor] targets different per store-item group
                 The shape should be (1, horizon, num_groups, num_var).
 
@@ -499,10 +475,10 @@ class SubModel(nn.Module):
         # run LSTM again on targets
         h = self.lstm(t_x, keep_hidden=False)
 
-        # run linear layer in batch mode on output of LSTM
-        y = self.fc(h.squeeze(0))
+        # run linear layer on output of LSTM
+        y = self.fc(h)
 
-        return y
+        return y.squeeze(0)
 
 
 class Model(nn.Module):
@@ -514,28 +490,29 @@ class Model(nn.Module):
         device           = [torch.device] device to put the model and data on
     """
 
-    def __init__(self, num_models, dropout, device):
+    def __init__(self, num_models, num_hidden, dropout, device):
         """Initializes the model.
 
         Args:
             num_models = [int] number of submodels to make
+            num_hidden = [int] number of hidden units per store-item group
             dropout    = [float] prob of dropping inter-group weight gradient
             device     = [torch.device] device to put the models and data on
         """
-        global num_groups
-
         super(Model, self).__init__()
 
-        min_model_groups = num_groups // num_models
-        num_extra_groups = num_groups % num_models
+        # determine number of groups each submodel will model
+        min_model_groups = FD.num_groups // num_models
+        num_extra_groups = FD.num_groups % num_models
         self.num_model_groups = torch.full((num_models,), min_model_groups)
         self.num_model_groups[:num_extra_groups] = min_model_groups + 1
         self.num_model_groups = self.num_model_groups.long().tolist()
 
+        # initialize submodels as a ModuleList on the correct device
         dropout = torch.tensor(dropout).to(device)
         self.submodels = nn.ModuleList()
-        for num_model_groups in self.num_model_groups:
-            submodel = SubModel(num_model_groups, dropout).to(device)
+        for num_groups in self.num_model_groups:
+            submodel = SubModel(num_groups, num_hidden, dropout).to(device)
             self.submodels.append(submodel)
 
         self.device = device
@@ -545,7 +522,7 @@ class Model(nn.Module):
         for submodel in self.submodels:
             submodel.reset_hidden()
 
-    def forward(self, day, items, t_day, t_items):
+    def forward(self, day, t_day, items, t_items):
         """Forward pass of the model.
 
         items and t_items are split, such that each submodel receives the
@@ -555,24 +532,25 @@ class Model(nn.Module):
         Args:
             day   = [torch.Tensor] inputs constant per store-item group
                 The shape should be (1, seq_len, num_const).
+            t_day   = [torch.Tensor] targets constant per store-item group
+                The shape should be (1, horizon, num_const).
             items = [torch.Tensor] inputs different per store-item group
                 The shape should be (1, seq_len, num_groups, num_var).
-            t_day   = [torch.Tensor] targets different per store-item group
-                The shape should be (1, horizon, num_const).
             t_items = [torch.Tensor] targets different per store-item group
                 The shape should be (1, horizon, num_groups, num_var).
 
         Returns [torch.Tensor]:
             Output of shape (horizon, num_groups)
         """
+        # put input on correct device and split for each submodel
         day = day.to(self.device)
-        items = items.to(self.device).split(self.num_model_groups, dim=-2)
         t_day = t_day.to(self.device)
+        items = items.to(self.device).split(self.num_model_groups, dim=-2)
         t_items = t_items.to(self.device).split(self.num_model_groups, dim=-2)
 
         y = []
         for submodel, items, t_items in zip(self.submodels, items, t_items):
-            sub_y = submodel(day, items, t_day, t_items)
+            sub_y = submodel(day, t_day, items, t_items)
             y.append(sub_y)
 
         return torch.cat(y, dim=-1)
@@ -580,8 +558,6 @@ class Model(nn.Module):
 
 if __name__ == '__main__':
     from datetime import datetime
-
-    # model = Model(1500, torch.device('cpu'))
 
     linear = Linear(100, 0.5)
 

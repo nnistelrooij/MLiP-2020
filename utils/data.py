@@ -1,3 +1,4 @@
+import math
 from pathlib import Path
 import random
 
@@ -10,15 +11,21 @@ class ForecastDataset(Dataset):
     """Dataset to load forecasts.
 
     Attributes:
-        day       = [np.ndarray] data constant per store-item group
-        snap      = [np.ndarray] whether or not SNAP purchases are allowed
-        prices    = [np.ndarray] sell prices of each item at all stores
-        sales     = [np.ndarray] unit sales of each item at all stores
-        seq_len   = [int] sequence length of model input
-        horizon   = [int] sequence length of model output, 0 for inference
-        start_idx = [int] random start index to get different data each epoch
+        start_idx  = [int] random start index to get different data each epoch
+        num_const  = [int] number of inputs constant per store-item group
+        num_var    = [int] number of inputs different per store-item group
+        num_groups = [int] number of store-item groups
+        day        = [np.ndarray] data constant per store-item group
+        snap       = [np.ndarray] whether or not SNAP purchases are allowed
+        prices     = [np.ndarray] sell prices of each item at all stores
+        sales      = [np.ndarray] unit sales of each item at all stores
+        seq_len    = [int] sequence length of model input
+        horizon    = [int] sequence length of model output, 0 for inference
     """
     start_idx = 0
+    num_const = 0
+    num_var = 0
+    num_groups = 0
 
     def __init__(self, calendar, prices, sales, seq_len=1, horizon=1):
         """Initializes forecast dataset.
@@ -43,47 +50,46 @@ class ForecastDataset(Dataset):
             axis=1
         ).astype(np.float32)
 
-        # sort sales table for consistency
-        sales = sales.sort_values(by=['store_id', 'item_id'])
-        sales.index = range(sales.shape[0])
-
         # get data different per store-item
         self.snap = self._snap(calendar, sales)
         self.prices = self._sell_prices(calendar, prices)
         self.sales = self._unit_sales(sales)
 
+        ForecastDataset.num_const = self.day.shape[1]
+        ForecastDataset.num_var = 3
+        ForecastDataset.num_groups = self.sales.shape[1]
         self.seq_len = seq_len
         self.horizon = horizon
 
     @staticmethod
     def _weekdays(calendar):
-        """One-hot representation of weekdays of shape (days, 7)."""
+        """One-hot representations of weekdays of shape (days, 7)."""
         return pd.RangeIndex(1, 8) == calendar[['wday']]
 
     @staticmethod
     def _weeks(calendar):
-        """Integers of week numbers of shape (days, 1)."""
+        """Vector of week numbers of shape (days, 1)."""
         return calendar[['wm_yr_wk']].apply(lambda x: x % 100)
 
     @staticmethod
     def _monthdays(calendar):
-        """Integers of month days of shape (days, 1)."""
+        """Vector of month days of shape (days, 1)."""
         return calendar[['date']].applymap(lambda x: x[-2:])
 
     @staticmethod
     def _months(calendar):
-        """One-hot representation of months of shape (days, 12)."""
+        """One-hot representations of months of shape (days, 12)."""
         return pd.RangeIndex(1, 13) == calendar[['month']]
 
     @staticmethod
     def _years(calendar):
-        """One-hot representation of years of shape (days, 3)."""
-        return pd.RangeIndex(2014, 2017) == calendar[['year']]
+        """One-hot representations of years of shape (days, 6)."""
+        return pd.RangeIndex(2011, 2017) == calendar[['year']]
 
     @staticmethod
     def _event_types(calendar):
-        """One-hot representation of event types of shape (days, 5)."""
-        # make one-hot vectors for each column in calendar table
+        """One-hot representations of event types of shape (days, 5)."""
+        # make one-hot vectors for each event type column in calendar table
         event_types = calendar['event_type_1'].unique()
         events1 = event_types == calendar[['event_type_1']].to_numpy()
         events2 = event_types == calendar[['event_type_2']].to_numpy()
@@ -96,7 +102,7 @@ class ForecastDataset(Dataset):
 
     @staticmethod
     def _snap(calendar, sales):
-        """Whether SNAP purchases are allowed of shape (days, N)."""
+        """Whether SNAP purchases are allowed of shape (days, 30490)."""
         # determine number of groups per state
         repetitions = sales.groupby('state_id').size()
 
@@ -107,14 +113,14 @@ class ForecastDataset(Dataset):
 
         # concatenate SNAP data for all states
         snap = pd.concat((snap_CA, snap_TX, snap_WI), axis=1)
+
+        # return normalized SNAP data in (num_days, num_groups) shape
+        snap = (snap - 0.33011681056373793) / 0.470254932932085
         return snap.to_numpy(dtype=np.float32)
 
     @staticmethod
     def _sell_prices(calendar, prices):
-        """Sell prices for each store-item of shape (days, N)."""
-        # sort prices on store-items
-        prices = prices.sort_values(by=['store_id', 'item_id'])
-
+        """Sell prices for each store-item group of shape (days, 30490)."""
         # pivot prices table to wide format
         prices = prices.set_index(['store_id', 'item_id'])
         prices = prices.pivot(columns='wm_yr_wk')
@@ -124,12 +130,13 @@ class ForecastDataset(Dataset):
         prices = prices.fillna(0)
         prices = prices[calendar['wm_yr_wk']]
 
-        # return prices in (num_days, num_groups) shape
+        # return normalized prices in (num_days, num_groups) shape
+        prices = (prices - 3.507094282300549) / 3.5222671176612437
         return prices.T.to_numpy(dtype=np.float32)
 
     @staticmethod
     def _unit_sales(sales):
-        """Unit sales for each store-item of shape (days, N)."""
+        """Unit sales for each store-item group of shape (days, 30490)."""
         return sales.filter(like='d_').T.to_numpy(dtype=np.float32)
 
     def __len__(self):
@@ -139,7 +146,7 @@ class ForecastDataset(Dataset):
         else:
             return len(self.prices) - 2
 
-    def _get_train_item(self, idx):
+    def _get_train_validation_item(self, idx):
         """Get input and target data during training or validation.
 
         Each epoch, a different starting index is sampled to increase data
@@ -151,14 +158,14 @@ class ForecastDataset(Dataset):
         Returns [[np.ndarray]*4]:
             day   = input data constant per store-item group
             targets_day = target data constant per store-item group
-                Shapes are (seq_len, 29), respectively (horizon + 1, 29)
-                with constituents:
+                Shapes are (seq_len, 32), respectively
+                (horizon + 1, 32) with constituents:
 
                 weekdays  = one-hot vectors of shape (T, 7)
-                weeks     = integers in range [1, 53] of shape (T, 1)
-                monthdays = integers in range [1, 31] of shape (T, 1)
+                weeks     = vector of shape (T, 1)
+                monthdays = vector of shape (T, 1)
                 months    = one-hot vectors of shape (T, 12)
-                years     = one-hot vectors of shape (T, 3)
+                years     = one-hot vectors of shape (T, 6)
                 events    = one-hot vectors of shape (T, 5)
             items   = input data different per store-item group
             targets_items = target data different per store-item group
@@ -196,7 +203,7 @@ class ForecastDataset(Dataset):
             axis=2
         )
 
-        return day, items, targets_day, targets_items
+        return day, targets_day, items, targets_items
 
     def _get_inference_item(self, idx):
         """Get input data during inference.
@@ -205,12 +212,12 @@ class ForecastDataset(Dataset):
         items, and sales separately, are returned.
 
         Returns [[np.ndarray]*3]:
-            day   = data constant per store-item group of shape (2, 29)
+            day   = data constant per store-item group of shape (2, 32)
                 weekdays  = one-hot vector of shape (2, 7)
-                weeks     = integer in range [1, 53] of shape (2, 1)
-                monthdays = integer in range [1, 31] of shape (2, 1)
+                weeks     = vector of shape (2, 1)
+                monthdays = vector of shape (2, 1)
                 months    = one-hot vector of shape (2, 12)
-                years     = one-hot vector of shape (2, 3)
+                years     = one-hot vector of shape (2, 6)
                 events    = one-hot vector of shape (2, 5)
             items = data different per store-item group of shape (2, 30490, 2)
                 snap      = booleans of shape (2, 30490)
@@ -235,7 +242,7 @@ class ForecastDataset(Dataset):
 
     def __getitem__(self, idx):
         if self.horizon:  # training or validation mode
-            return self._get_train_item(idx)
+            return self._get_train_validation_item(idx)
         else:  # inference mode
             return self._get_inference_item(idx)
 
@@ -244,18 +251,25 @@ def data_frames(path):
     """Load the data from storage into pd.DataFrame objects.
 
     Args:
-        path     = [str] path to folder with competition data
+        path = [str] path to folder with competition data
 
     Returns [[pd.DataFrame]*3]:
-        calendar = [pd.DataFrame] table with data on each date
+        calendar = [pd.DataFrame] sorted table with data on each date
         prices   = [pd.DataFrame] sell prices per store-item for each week
         sales    = [pd.DataFrame] unit sales per store-item for each day
     """
     path = Path(path)
 
+    # load DataFrames from storage
     calendar = pd.read_csv(path / 'calendar.csv')
     prices = pd.read_csv(path / 'sell_prices.csv')
     sales = pd.read_csv(path / 'sales_train_validation.csv')
+
+    # sort data on lowest level of time series hierarchy
+    prices = prices.sort_values(by=['store_id', 'item_id'])
+    prices.index = range(prices.shape[0])
+    sales = sales.sort_values(by=['store_id', 'item_id'])
+    sales.index = range(sales.shape[0])
 
     return calendar, prices, sales
 

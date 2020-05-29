@@ -2,6 +2,7 @@ import argparse
 from datetime import datetime
 
 import torch
+from torch.optim import Adagrad
 
 from nn import Model, WRMSSE
 from optim import optimize, ReduceLROnPlateau
@@ -29,6 +30,8 @@ def handle_arguments():
                         help='number of iters over training data, default: 50')
     parser.add_argument('-m', '--model', type=str, default='models/model.pt',
                         help='path to save model, default: "models/model.pt"')
+    parser.add_argument('-h', '--num_hidden', type=int, default=5,
+                        help='hidden units per store-item group, default: 5')
 
     # parse and print arguments
     args = parser.parse_args()
@@ -57,7 +60,7 @@ if __name__ == '__main__':
     print('DEVICE:', device)
 
     # initialize network and show summary
-    model = Model(args.num_models, args.dropout, device)
+    model = Model(args.num_models, args.num_hidden, args.dropout, device)
 
     # TensorBoard writers
     current_time = datetime.now().strftime("%Y-%m-%d/%H'%M'%S")
@@ -65,7 +68,7 @@ if __name__ == '__main__':
     val_writer = MetricWriter(f'runs/{current_time}/validation', eval_freq=1)
 
     # initialize optimizer, scheduler, and criterion
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = Adagrad(model.parameters(), lr=0.01)
     scheduler = ReduceLROnPlateau(val_writer, optimizer)
     criterion = WRMSSE(calendar, prices, sales, device)
 

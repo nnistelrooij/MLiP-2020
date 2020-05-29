@@ -75,10 +75,10 @@ def train(model, train_loader, train_writer, optimizer, criterion, epoch):
     """
     num_days = 0
     for data in tqdm(train_loader, desc=f'Train Epoch {epoch}'):
-        day, items, t_day, t_items = data
+        day, t_day, items, t_items = data
 
         # predict sales projections
-        y = model(day, items, t_day[:, :-1], t_items[:, :-1])
+        y = model(day, t_day[:, :-1], items, t_items[:, :-1])
 
         # compute loss and show on TensorBoard every eval_freq iterations
         loss = criterion(y, t_items[0, 1:, :, 2])
@@ -123,13 +123,13 @@ def validate(model, val_loader, val_writer, criterion, epoch, num_days):
     targets = torch.empty(0, 30490)
 
     with torch.no_grad():
-        for day, items, t_day, t_items in val_iter:
+        for day, t_day, items, t_items in val_iter:
             # replace actual sales in items and t_items with projected sales
             items[0, 0:len(sales) > 1, :, 2] = sales[-2:-1]
             t_items[0, 0:len(sales) > 0, :, 2] = sales[-1:]
 
             # predict with sales projections from previous days
-            y = model(day, items, t_day[:, :-1], t_items[:, :-1])
+            y = model(day, t_day[:, :-1], items, t_items[:, :-1])
 
             # add sales projections and targets to tables
             sales = torch.cat((sales, y))
