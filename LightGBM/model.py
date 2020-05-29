@@ -20,7 +20,7 @@ def train(train_set, val_set, num_rounds=100, early_stopping_rounds=10,
           params=default_params, save_model=None):
     """
     Train LightGBM model.  
-    The `params` are adapted from:
+    The default `params` are adapted from:
     https://www.kaggle.com/kneroma/m5-first-public-notebook-under-0-50
 
     Args:
@@ -35,13 +35,13 @@ def train(train_set, val_set, num_rounds=100, early_stopping_rounds=10,
         Trained LightGBM model.
     """
     model = lgb.train(params, 
-                        train_set, 
-                        num_boost_round=num_rounds,
-                        valid_sets=[train_set, val_set], 
-                        valid_names=['train', 'validation'],
-                        categorical_feature=train_set.categorical_feature,
-                        early_stopping_rounds=early_stopping_rounds,
-                        verbose_eval=int(num_rounds/10))
+                      train_set, 
+                      num_boost_round=num_rounds,
+                      valid_sets=[train_set, val_set], 
+                      valid_names=['train', 'validation'],
+                      categorical_feature=train_set.categorical_feature,
+                      early_stopping_rounds=early_stopping_rounds,
+                      verbose_eval=int(num_rounds/10))
     
     if save_model:
         model.save_model(save_model)

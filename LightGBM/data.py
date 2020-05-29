@@ -114,35 +114,36 @@ def melt_and_merge(calendar, prices, sales, submission=False):
         sales    = [pd.DataFrame] historical daily unit sales data per product and store 
 
     Returns [pd.DataFrame]:
-        Merged long format dataframe
+        Merged long format dataframe.
     """
     id_cols = ['id', 'item_id', 'dept_id','store_id', 'cat_id', 'state_id']
+
     if submission:
         sales.drop(sales.columns[6:-MAX_LAG], axis=1, inplace=True)
         for day in range(LAST_DAY + 1, LAST_DAY + 28 + 1):
-            sales[f"d_{day}"] = np.nan
+            sales[f'd_{day}'] = np.nan
 
     df = pd.melt(sales,
-                id_vars = id_cols,
-                var_name = 'd',
-                value_name = 'sales')
+                id_vars=id_cols,
+                var_name='d',
+                value_name='sales')
 
-    df = df.merge(calendar, on = 'd', copy = False)
-    df = df.merge(prices, on = ['store_id', 'item_id', 'wm_yr_wk'], copy = False)
+    df = df.merge(calendar, on='d', copy = False)
+    df = df.merge(prices, on=['store_id', 'item_id', 'wm_yr_wk'], copy=False)
 
     return df
 
 
-def features(df):
+def features(df, submission=False):
     """
-    Create features.
+    Create lag and rolling mean features.
     Adapted from: https://www.kaggle.com/kneroma/m5-first-public-notebook-under-0-50
 
     Args:
         df = [pd.DataFrame] long format dataframe
 
     Returns [pd.DataFrame]:
-        dataframe with created features
+        Dataframe with created features.
     """
     lags = [7, 28]
     lag_cols = [f"lag_{lag}" for lag in lags]
@@ -171,7 +172,9 @@ def features(df):
         else:
             df[name] = getattr(df["date"].dt, attribute).astype("int16")
 
-    df.dropna(inplace = True)
+    if not submission:
+        df.dropna(inplace=True)
+
     return df
 
 

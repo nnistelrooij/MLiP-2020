@@ -1,8 +1,6 @@
 import argparse
 from datetime import datetime
 
-import lightgbm as lgb
-
 import model
 from data import data_frames, optimize_df, lgb_dataset
 
