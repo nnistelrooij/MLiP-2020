@@ -1,5 +1,7 @@
 import pandas as pd
 
+import lightgbm as lgb
+
 from datetime import datetime, timedelta
 from tqdm import tqdm
 
@@ -93,13 +95,16 @@ if __name__ == "__main__":
     print("Loading training data...")
     start_time = datetime.now()
     calendar, prices, sales = data_frames('../kaggle/input/m5-forecasting-accuracy/')
-    calendar, prices, sales = optimize_df(calendar, prices, sales, days=100)
-    train_set, val_set = lgb_dataset(calendar, prices, sales)
-    print("Data load time:", datetime.now() - start_time)
+    calendar, prices, sales = optimize_df(calendar, prices, sales, days=365)
 
-    start_time = datetime.now()
-    lgb_model = model.train(train_set, val_set)
-    # lgb_model = lgb.Booster(model_file='../models/model.lgb')
-    print("Model train time:", datetime.now() - start_time)
+    # Train from scratch
+    # train_set, val_set = lgb_dataset(calendar, prices, sales)
+    print("Data load time:", datetime.now() - start_time)
+    # start_time = datetime.now()
+    # lgb_model = model.train(train_set, val_set)    
+    # print("Model train time:", datetime.now() - start_time)
+
+    # Load trained model
+    lgb_model = lgb.Booster(model_file='../models/model_365d_500it.lgb')
 
     submission = infer(lgb_model, calendar, prices, sales)

@@ -3,6 +3,7 @@ from datetime import datetime
 
 import model
 from data import data_frames, optimize_df, lgb_dataset
+from kaggle  import infer
 
 
 def handle_arguments():
@@ -11,8 +12,12 @@ def handle_arguments():
                         r'"kaggle/input/m5-accuracy"')
     parser.add_argument('-d', '--days', type=int, default=365,
                         help='total number of days to train on, default: 365')
+    parser.add_argument('-i', '--iters', type=int, default=200,
+                        help='number of training iterations, default: 200')
+    parser.add_argument('-k', '--kaggle', action='store_true',
+                        help='switch to create a kaggle submission')
     parser.add_argument('-s', '--save', type=str, default=None,
-                        help='path to save model')
+                        help='path to save model, default: None')
 
     # parse and print arguments
     args = parser.parse_args()
@@ -22,7 +27,21 @@ def handle_arguments():
     return args
 
 
-def run(path, days, model_path=None):
+def run(path, days=None, iters=200, kaggle=False, model_path=None):
+    """
+    Train a LightGBM model, and optionally create a kaggle submission.
+
+    Args:
+        path        = [str] path to folder with competition data
+        days        = [int] number of days to keep
+        iters       = [int] number of training iterations
+        kaggle      = [boolean] if True, create a kaggle submission
+        model_path  = [str] path to save model
+
+    Returns [(lgb.Booster, pd.DataFrame)]:
+        lgb_model = trained LightGBM model
+        submission = submission dataframe
+    """
     print("Loading training data...")
     start_time = datetime.now()
     calendar, prices, sales = data_frames(path)
@@ -31,12 +50,19 @@ def run(path, days, model_path=None):
     print("Data load time:", datetime.now() - start_time)
 
     start_time = datetime.now()
-    lgb_model = model.train(train_set, val_set, save_model=model_path)
+    lgb_model = model.train(train_set, val_set, num_rounds=iters, save_model=model_path)
     print("Model train time:", datetime.now() - start_time)
 
-    return lgb_model
+    if kaggle:
+        submission = infer(lgb_model, calendar, prices, sales)
+
+    return lgb_model, submission
 
 
 if __name__ == "__main__":
     args = handle_arguments()
-    booster = run(path=args.path, days=args.days, model_path=args.save)
+    booster, submission = run(path=args.path, 
+                              days=args.days, 
+                              iters=args.iters,
+                              kaggle=args.kaggle, 
+                              model_path=args.save)
