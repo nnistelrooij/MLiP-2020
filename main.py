@@ -79,6 +79,7 @@ if __name__ == '__main__':
              optimizer, scheduler,
              criterion,
              args.epochs,
+             args.num_val_days,
              args.model)
 
     # close TensorBoard writers to flush communication

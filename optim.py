@@ -70,9 +70,8 @@ def train(model, train_loader, train_writer, optimizer, criterion, epoch):
         criterion    = [nn.Module] neural network module to compute loss
         epoch        = [int] current iteration over the training data set
 
-    Returns:
-        num_input_days  = [int] total number of input days given to model
-        num_target_days = [int] last number of target days given to model
+    Returns [int]:
+        Total number of input days given to model during this epoch.
     """
     num_input_days = 0
     for data in tqdm(train_loader, desc=f'Train Epoch {epoch}'):
@@ -93,21 +92,21 @@ def train(model, train_loader, train_writer, optimizer, criterion, epoch):
         # bookkeeping
         num_input_days += day.shape[1]
 
-    return num_input_days, t_day.shape[1] - 1
+    return num_input_days
 
 
 def validate(model, val_loader, val_writer, criterion,
-             epoch, num_input_days, num_target_days):
+             epoch, num_input_days, num_val_days):
     """Computes loss of current model on validation data.
 
     Args:
-        model           = [nn.Module] model to test with validation data set
-        val_loader      = [DataLoader] validation data loader
-        val_writer      = [MetricWriter] TensorBoard writer of validation loss
-        criterion       = [nn.Module] neural network module to compute loss
-        epoch           = [int] current iteration over the training data set
-        num_input_days  = [int] total number of input days given to model
-        num_target_days = [int] last number of target days given to model
+        model          = [nn.Module] model to test with validation data set
+        val_loader     = [DataLoader] validation data loader
+        val_writer     = [MetricWriter] TensorBoard writer of validation loss
+        criterion      = [nn.Module] neural network module to compute loss
+        epoch          = [int] current iteration over the training data set
+        num_input_days = [int] total number of input days given to model
+        num_val_days   = [int] number of days to use for validation data
 
     Returns [torch.Tensor]:
         Validation loss over one epoch.
@@ -122,6 +121,7 @@ def validate(model, val_loader, val_writer, criterion,
         next(val_iter)
 
     # pass data of last target days through model
+    num_target_days = len(val_loader) - num_val_days - current_day
     with torch.no_grad():
         for _ in range(num_target_days):
             day, t_day, items, t_items = next(val_iter)
@@ -160,6 +160,7 @@ def optimize(model,
              optimizer, scheduler,
              criterion,
              num_epochs,
+             num_val_days,
              model_path):
     """Trains and validates model and saves best-performing model.
 
@@ -173,6 +174,7 @@ def optimize(model,
         scheduler    = [object] scheduler to update the learning rates
         criterion    = [nn.Module] neural network module to compute losses
         num_epochs   = [int] number of iterations over the training data
+        num_val_days = [int] number of days to use for validation data
         model_path   = [str] path where trained model is saved
     """
     for epoch in range(1, num_epochs + 1):
@@ -180,14 +182,14 @@ def optimize(model,
         model.reset_hidden()
         
         # update model weights given losses on train days
-        num_input_days, num_target_days = train(
+        num_input_days = train(
             model, train_loader, train_writer, optimizer, criterion, epoch
         )
 
         # determine score on validation days
         val_score = validate(
             model, val_loader, val_writer, criterion,
-            epoch, num_input_days, num_target_days
+            epoch, num_input_days, num_val_days
         )
 
         # update learning rate given validation score
