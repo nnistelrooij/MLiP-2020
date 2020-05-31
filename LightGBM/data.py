@@ -19,7 +19,8 @@ def downcast(df, verbose=False):
     Adapted from: https://www.kaggle.com/ragnar123/very-fst-model
 
     Args:
-        df = [pd.DataFrame] pandas dataframe
+        df      = [pd.DataFrame] pandas dataframe
+        verbose = [boolean] if True, print memory reduction
     
     Returns [pd.DataFrame]:
         Downcasted data.
@@ -51,8 +52,7 @@ def downcast(df, verbose=False):
 
     end_mem = df.memory_usage().sum() / 1024**2
     if verbose: 
-        print('Mem. usage decreased to {:5.2f} Mb ({:.1f}% reduction)' \
-                .format(end_mem, 100 * (start_mem - end_mem) / start_mem))
+        print(f'Mem. usage decreased to {end_mem:5.2f} Mb ({(start_mem - end_mem) / start_mem:.1%} reduction)')
     return df
 
 
@@ -61,7 +61,8 @@ def obj_as_cat_int(df, ignore=[]):
     Convert object columns to categorical integers.
 
     Args:
-        df = [pd.DataFrame] pandas dataframe
+        df      = [pd.DataFrame] pandas dataframe
+        ignore  = [list] list of columns to ignore in conversion
     
     Returns [pd.DataFrame]:
         Data where object columns are encoded as categorical integers.
@@ -86,7 +87,7 @@ def optimize_df(calendar, prices, sales, days=None, verbose=False):
         days     = [int] number of days to keep
         verbose  = [boolean] if True, print memory reduction
 
-    Returns [(pd.DataFrame) * 3]
+    Returns [[pd.DataFrame] * 3]
         Optimized dataframes.
     """
     assert days > 56, f"Minimum days is {MAX_LAG}."
@@ -109,9 +110,10 @@ def melt_and_merge(calendar, prices, sales, submission=False):
     calendar and prices to create one dataframe.
 
     Args:
-        calendar = [pd.DataFrame] dates of product sales
-        prices   = [pd.DataFrame] price of the products sold per store and date
-        sales    = [pd.DataFrame] historical daily unit sales data per product and store 
+        calendar    = [pd.DataFrame] dates of product sales
+        prices      = [pd.DataFrame] price of the products sold per store and date
+        sales       = [pd.DataFrame] historical daily unit sales data per product and store
+        submission  = [boolean] if True, add day columns required for submission
 
     Returns [pd.DataFrame]:
         Merged long format dataframe.
@@ -140,7 +142,8 @@ def features(df, submission=False):
     Adapted from: https://www.kaggle.com/kneroma/m5-first-public-notebook-under-0-50
 
     Args:
-        df = [pd.DataFrame] long format dataframe
+        df          = [pd.DataFrame] long format dataframe
+        submission  = [boolean] if True, do not drop NaN rows
 
     Returns [pd.DataFrame]:
         Dataframe with created features.
@@ -152,19 +155,18 @@ def features(df, submission=False):
 
     windows = [7, 28]
     for window in windows :
-        for lag,lag_col in zip(lags, lag_cols):
-            df[f"rmean_{lag}_{window}"] = df[["id", lag_col]] \
-                .groupby("id")[lag_col] \
-                .transform(lambda x: x.rolling(window).mean())
+        for lag, lag_col in zip(lags, lag_cols):
+            lag_by_id = df[["id", lag_col]].groupby("id")[lag_col]
+            df[f"rmean_{lag}_{window}"] = lag_by_id.transform(lambda x: x.rolling(window).mean())
 
     date_features = {
-                     "wday": "weekday",
-                     "week": "weekofyear",
-                     "month": "month",
-                     "quarter": "quarter",
-                     "year": "year",
-                     "mday": "day"
-                    }
+        "wday": "weekday",
+        "week": "weekofyear",
+        "month": "month",
+        "quarter": "quarter",
+        "year": "year",
+        "mday": "day"
+    }
     
     for name, attribute in date_features.items():
         if name in df.columns:
@@ -185,7 +187,7 @@ def training_data(df):
     Args:
         df = [pd.DataFrame] pandas dataframe
 
-    Returns [(pd.DataFrame) * 2]:
+    Returns [[pd.DataFrame] * 2]:
         X = training features
         y = training labels
     """
@@ -208,7 +210,7 @@ def lgb_dataset(calendar, prices, sales):
         prices   = [pd.DataFrame] price of the products sold per store and date
         sales    = [pd.DataFrame] historical daily unit sales data per product and store 
 
-    Returns [lgb.Dataset]:
+    Returns [[lgb.Dataset] * 2]:
         train_set = LightGBM training dataset
         val_set = LightGBM validation dataset
     """
@@ -239,7 +241,7 @@ def data_frames(path):
     Args:
         path = [str] path to folder with competition data
 
-    Returns [(pd.DataFrame)*3]:
+    Returns [[pd.DataFrame] * 3]:
         calendar = [pd.DataFrame] dates of product sales
         prices   = [pd.DataFrame] price of the products sold per store and date
         sales    = [pd.DataFrame] historical daily unit sales data per product and store 

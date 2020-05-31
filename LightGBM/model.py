@@ -4,16 +4,16 @@ import lightgbm as lgb
 # All available parameters can be found here:  
 # https://lightgbm.readthedocs.io/en/latest/Parameters.html
 default_params = {
-                  'objective': 'poisson',
-                  'metric': 'rmse',
-                  'force_row_wise': True,
-                  'learning_rate': 0.075,
-                  'sub_row': 0.75,
-                  'bagging_freq': 1,
-                  'lambda_l2': 0.1,
-                  'num_leaves': 128,
-                  'min_data_in_leaf': 100,
-                }
+    'objective': 'poisson',
+    'metric': 'rmse',
+    'force_row_wise': True,
+    'learning_rate': 0.075,
+    'sub_row': 0.75,
+    'bagging_freq': 1,
+    'lambda_l2': 0.1,
+    'num_leaves': 128,
+    'min_data_in_leaf': 100,
+}
 
 
 def train(train_set, val_set, num_rounds=100, early_stopping_rounds=10, 
