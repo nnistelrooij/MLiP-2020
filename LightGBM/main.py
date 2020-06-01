@@ -12,7 +12,7 @@ def handle_arguments():
                         r'"kaggle/input/m5-accuracy"')
     parser.add_argument('-d', '--days', type=int, default=365,
                         help='total number of days to train on, default: 365')
-    parser.add_argument('-v', '--val_days', type=int, default=365,
+    parser.add_argument('-v', '--val_days', type=int, default=0,
                         help='number of validation days, default: 0')
     parser.add_argument('-i', '--iters', type=int, default=200,
                         help='number of training iterations, default: 200')
