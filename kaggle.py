@@ -44,28 +44,34 @@ def infer(model, loader):
 
 
 if __name__ == '__main__':
-    device = torch.device('cuda')
-    num_models = 1500  # number of submodels
-    num_days = 365  # number of days prior the days with missing sales
-    num_hidden = 5  # number of hidden units per store-item group
+    from datetime import datetime
 
-    path = ('D:/Users/Niels-laptop/Documents/2019-2020/Machine '
-            'Learning in Practice/Competition 2/project')
+    time = datetime.now()
+
+    device = torch.device('cuda')
+    num_models = 300  # number of submodels
+    num_days = 1000  # number of days prior the days with missing sales
+    num_hidden = 6  # number of hidden units per store-item group
+    dropout = 0.99  # probability of dropping inter-group weight grad
+    model_path = 'models/model.pt'  # path to trained model
+    submission_path = 'submission.csv'
+    path = r'D:\Users\Niels-laptop\Documents\2019-2020\Machine Learning in Practice\Competition 2\project'
+
     calendar, prices, sales = data_frames(path)
 
     # get last 365 days of data plus the extra days
     num_extra_days = calendar.shape[0] - (sales.shape[1] - 6)
-    calendar = calendar.iloc[-num_days - num_extra_days:]
+    calendar = calendar.iloc[-num_days - num_extra_days - 29:-28]
 
     # get last 365 days of sales data
-    sales = pd.concat((sales.iloc[:, :6], sales.iloc[:, -num_days:]), axis=1)
+    sales = pd.concat((sales.iloc[:, :6], sales.iloc[:, -num_days - 29:-28]), axis=1)
 
     # make DataLoader from inference data
     loader = DataLoader(ForecastDataset(calendar, prices, sales, horizon=0))
 
     # initialize trained model on correct device
-    model = Model(num_models, num_hidden, 0.99, device)
-    model.load_state_dict(torch.load('models/model.pt', map_location=device))
+    model = Model(num_models, num_hidden, dropout, device)
+    model.load_state_dict(torch.load(model_path, map_location=device))
     model.reset_hidden()
     model.eval()
 
@@ -84,4 +90,6 @@ if __name__ == '__main__':
 
     # concatenate all projections and save to storage
     projections = pd.concat((validation, evaluation), axis=0)
-    projections.to_csv('submission.csv', index=False)
+    projections.to_csv(submission_path, index=False)
+
+    print('Time for inference:', datetime.now() - time)
