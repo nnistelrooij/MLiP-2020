@@ -30,7 +30,7 @@ def handle_arguments():
                         help='number of iters over training data, default: 50')
     parser.add_argument('-m', '--model', type=str, default='models/model.pt',
                         help='path to save model, default: "models/model.pt"')
-    parser.add_argument('-h', '--num_hidden', type=int, default=5,
+    parser.add_argument('-l', '--num_hidden', type=int, default=5,
                         help='hidden units per store-item group, default: 5')
 
     # parse and print arguments
@@ -79,6 +79,7 @@ if __name__ == '__main__':
              optimizer, scheduler,
              criterion,
              args.epochs,
+             args.num_val_days,
              args.model)
 
     # close TensorBoard writers to flush communication
