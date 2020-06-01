@@ -10,7 +10,6 @@ import model
 
 
 # Global constants
-FIRST_DATE = datetime(2016, 4, 25) #  first date of validation and evaluation days
 MAX_LAG = timedelta(days=57)
 
 
@@ -30,7 +29,7 @@ def next_day_features(df, forecast_date):
     return forecast_df
 
 
-def make_submission(df):
+def make_submission(df, first_date):
     """
     Create dataframe in the correct format for submission.
 
@@ -42,7 +41,7 @@ def make_submission(df):
     """
     cols = [f"F{i}" for i in range(1, 29)] 
 
-    submission = df.loc[df['date'] >= FIRST_DATE, ['id', 'sales']].copy()
+    submission = df.loc[df['date'] >= first_date, ['id', 'sales']].copy()
     submission['F'] = [f'F{rank}' for rank in submission.groupby('id')['id'].cumcount() + 1]
     submission = submission.set_index(['id', 'F']).unstack()['sales'][cols].reset_index()
     submission.fillna(0., inplace=True)
@@ -73,9 +72,12 @@ def infer(model, calendar, prices, sales):
     # create test dataset for submission
     df = melt_and_merge(calendar, prices, sales, submission=True)
 
+    # set first forecast date
+    first_date = df.date[pd.isnull(df.sales)].min().to_pydatetime()
+
     # forecast the 28 days for validation
     for day in tqdm(range(0, 28)):
-        forecast_date = FIRST_DATE + timedelta(days=day)
+        forecast_date = first_date + timedelta(days=day)
         forecast_df = next_day_features(df, forecast_date)
 
         drop_cols = ['id', 'date', 'sales', 'd', 'wm_yr_wk', 'weekday']
@@ -85,7 +87,7 @@ def infer(model, calendar, prices, sales):
         df.loc[df['date'] == forecast_date, 'sales'] = model.predict(forecast_df)
 
     # create the submission file
-    submission = make_submission(df)
+    submission = make_submission(df, first_date)
     submission.to_csv('submission.csv', index=False)
 
     return submission

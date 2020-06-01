@@ -9,7 +9,6 @@ import lightgbm as lgb
 
 
 # Global constants
-LAST_DAY = 1913
 MAX_LAG = 57
 
 
@@ -76,7 +75,7 @@ def obj_as_cat_int(df, ignore=[]):
     return df
 
 
-def optimize_df(calendar, prices, sales, days=None, verbose=False):
+def optimize_df(calendar, prices, sales, days=None, val_days=0, verbose=False):
     """
     Optimize dataframe.
 
@@ -85,17 +84,20 @@ def optimize_df(calendar, prices, sales, days=None, verbose=False):
         prices   = [pd.DataFrame] price of the products sold per store and date
         sales    = [pd.DataFrame] historical daily unit sales data per product and store 
         days     = [int] number of days to keep
+        val_days = [int] number of validation days
         verbose  = [boolean] if True, print memory reduction
 
     Returns [[pd.DataFrame] * 3]
         Optimized dataframes.
     """
     assert days > 56, f"Minimum days is {MAX_LAG}."
-    assert days < LAST_DAY + 1, f"Maximum days is {LAST_DAY}."
+    assert val_days != 0, "Invalid number of validation days."
     calendar['date'] = pd.to_datetime(calendar['date'], format='%Y-%m-%d')
 
-    if days:
-        sales.drop(sales.columns[6:-days], axis=1, inplace=True)
+    if val_days:
+        sales = sales.drop(sales.columns[-val_days:], axis=1)
+    if days:        
+        sales = sales.drop(sales.columns[6:-days], axis=1)
 
     calendar = downcast( obj_as_cat_int(calendar, ignore=['d']), verbose )
     prices = downcast( obj_as_cat_int(prices), verbose )
@@ -121,8 +123,9 @@ def melt_and_merge(calendar, prices, sales, submission=False):
     id_cols = ['id', 'item_id', 'dept_id','store_id', 'cat_id', 'state_id']
 
     if submission:
+        last_day = int(sales.columns[-1].replace('d_', ''))
         sales.drop(sales.columns[6:-MAX_LAG], axis=1, inplace=True)
-        for day in range(LAST_DAY + 1, LAST_DAY + 28 + 1):
+        for day in range(last_day + 1, last_day + 28 + 1):
             sales[f'd_{day}'] = np.nan
 
     df = pd.melt(sales,
