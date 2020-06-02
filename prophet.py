@@ -1,3 +1,4 @@
+import sys
 from datetime import datetime
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
@@ -79,6 +80,8 @@ def submit(sales, validation, evaluation, submission_path):
 if __name__ == '__main__':
     time = datetime.now()
 
+    sys.stdout = open('out.txt', 'w')
+
     num_days = 1000
     path = Path(r'D:\Users\Niels-laptop\Documents\2019-2020\Machine Learning '
                 r'in Practice\Competition 2\project')
@@ -87,7 +90,7 @@ if __name__ == '__main__':
     sales = pd.read_csv(path / 'sales_train_validation.csv')
     sales = sales.sort_values(by=['store_id', 'item_id'])
     sales = sales.set_index('id')
-    sales = sales.iloc[:, -num_days - 28:-28]
+    sales = sales.iloc[:10, -num_days - 28:-28]
     sales = sales.T
 
     cal = pd.read_csv(path / 'calendar.csv')[['date', 'd']]
@@ -109,3 +112,4 @@ if __name__ == '__main__':
 
     submit(sales, validation, evaluation, submission_path)
     print('Submission time:', datetime.now() - time)
+    sys.stdout.close()
