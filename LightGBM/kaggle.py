@@ -56,7 +56,7 @@ def make_submission(df, first_date):
     return submission
 
 
-def infer(model, calendar, prices, sales):
+def infer(model, calendar, prices, sales, filename=''):
     """
     Infer the unit sales with the model.
 
@@ -88,20 +88,41 @@ def infer(model, calendar, prices, sales):
 
     # create the submission file
     submission = make_submission(df, first_date)
-    submission.to_csv('submission.csv', index=False)
+    submission.to_csv(f'submission{filename}.csv', index=False)
 
     return submission
 
 
 if __name__ == "__main__":
-    print("Loading training data...")
-    start_time = datetime.now()
-    calendar, prices, sales = data_frames('../kaggle/input/m5-forecasting-accuracy/')
-    calendar, prices, sales = optimize_df(calendar, prices, sales, days=365)
-    print("Data load time:", datetime.now() - start_time)
+    # print("Loading training data...")
+    # start_time = datetime.now()
+    # calendar, prices, sales = data_frames('../kaggle/input/m5-forecasting-accuracy/')
+    # calendar, prices, sales = optimize_df(calendar, prices, sales, days=365)
+    # print("Data load time:", datetime.now() - start_time)
 
-    # Load trained model
-    filename = '../models/model_365d_500it.lgb'
-    lgb_model = lgb.Booster(model_file=filename)
+    # # Load trained model
+    # filename = '../models/model_365d_500it.lgb'
+    # lgb_model = lgb.Booster(model_file=filename)
 
-    submission = infer(lgb_model, calendar, prices, sales)
+    # submission = infer(lgb_model, calendar, prices, sales)
+
+    # Make 4 submission for the report
+    DATAPATH = '../kaggle/input/m5-forecasting-accuracy/'
+    calendar, prices, sales = data_frames(DATAPATH)
+    
+    MODELPATH = '../models/'
+    runs = [(f'{MODELPATH}lgb_year.pt', 365), (f'{MODELPATH}lgb_all.pt', 1000)]    
+    val_test = [('val', 28), ('test', 0)]
+
+    for model_file, days in runs:
+        print(f'Starting submissions for {model_file}')
+        model = lgb.Booster(model_file=model_file)        
+        for label, val_days in val_test:
+            print(f'# {label} set')
+            calendar_opt, prices_opt, sales_opt = optimize_df(calendar.copy(), 
+                                                              prices.copy(), 
+                                                              sales.copy(), 
+                                                              days=days,
+                                                              val_days=val_days)
+            sub_suffix = f'_lgb_{days}d_{label}'        
+            submission = infer(model, calendar_opt, prices_opt, sales_opt, filename=sub_suffix)
