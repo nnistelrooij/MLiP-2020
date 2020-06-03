@@ -294,10 +294,14 @@ def data_loaders(calendar, prices, sales,
     """
     # get last num_days days of data plus the extra days
     num_extra_days = calendar.shape[0] - (sales.shape[1] - 6)
-    calendar = calendar.iloc[-num_days - num_extra_days:]
+    calendar = calendar.iloc[-num_days - num_extra_days - num_val_days - 1:]
 
     # get last num_days days of sales data
-    sales = pd.concat((sales.iloc[:, :6], sales.iloc[:, -num_days:]), axis=1)
+    sales = pd.concat((
+        sales.iloc[:, :6],
+        sales.iloc[:, -num_days - num_val_days - 1:]),
+        axis=1
+    )
 
     # make DataLoader with only training days
     train_sales = sales.iloc[:, :-num_val_days - 1]
