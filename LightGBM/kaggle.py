@@ -10,7 +10,6 @@ import model
 
 
 # Global constants
-FIRST_DATE = datetime(2016, 4, 25) #  first date of validation and evaluation days
 MAX_LAG = timedelta(days=57)
 
 
@@ -30,7 +29,7 @@ def next_day_features(df, forecast_date):
     return forecast_df
 
 
-def make_submission(df):
+def make_submission(df, first_date):
     """
     Create dataframe in the correct format for submission.
 
@@ -42,7 +41,7 @@ def make_submission(df):
     """
     cols = [f"F{i}" for i in range(1, 29)] 
 
-    submission = df.loc[df['date'] >= FIRST_DATE, ['id', 'sales']].copy()
+    submission = df.loc[df['date'] >= first_date, ['id', 'sales']].copy()
     submission['F'] = [f'F{rank}' for rank in submission.groupby('id')['id'].cumcount() + 1]
     submission = submission.set_index(['id', 'F']).unstack()['sales'][cols].reset_index()
     submission.fillna(0., inplace=True)
@@ -57,7 +56,7 @@ def make_submission(df):
     return submission
 
 
-def infer(model, calendar, prices, sales):
+def infer(model, calendar, prices, sales, filename=''):
     """
     Infer the unit sales with the model.
 
@@ -73,9 +72,12 @@ def infer(model, calendar, prices, sales):
     # create test dataset for submission
     df = melt_and_merge(calendar, prices, sales, submission=True)
 
+    # set first forecast date
+    first_date = df.date[pd.isnull(df.sales)].min().to_pydatetime()
+
     # forecast the 28 days for validation
     for day in tqdm(range(0, 28)):
-        forecast_date = FIRST_DATE + timedelta(days=day)
+        forecast_date = first_date + timedelta(days=day)
         forecast_df = next_day_features(df, forecast_date)
 
         drop_cols = ['id', 'date', 'sales', 'd', 'wm_yr_wk', 'weekday']
@@ -85,21 +87,42 @@ def infer(model, calendar, prices, sales):
         df.loc[df['date'] == forecast_date, 'sales'] = model.predict(forecast_df)
 
     # create the submission file
-    submission = make_submission(df)
-    submission.to_csv('submission.csv', index=False)
+    submission = make_submission(df, first_date)
+    submission.to_csv(f'submission{filename}.csv', index=False)
 
     return submission
 
 
 if __name__ == "__main__":
-    print("Loading training data...")
-    start_time = datetime.now()
-    calendar, prices, sales = data_frames('../kaggle/input/m5-forecasting-accuracy/')
-    calendar, prices, sales = optimize_df(calendar, prices, sales, days=365)
-    print("Data load time:", datetime.now() - start_time)
+    # print("Loading training data...")
+    # start_time = datetime.now()
+    # calendar, prices, sales = data_frames('../kaggle/input/m5-forecasting-accuracy/')
+    # calendar, prices, sales = optimize_df(calendar, prices, sales, days=365)
+    # print("Data load time:", datetime.now() - start_time)
 
-    # Load trained model
-    filename = '../models/model_365d_500it.lgb'
-    lgb_model = lgb.Booster(model_file=filename)
+    # # Load trained model
+    # filename = '../models/model_365d_500it.lgb'
+    # lgb_model = lgb.Booster(model_file=filename)
 
-    submission = infer(lgb_model, calendar, prices, sales)
+    # submission = infer(lgb_model, calendar, prices, sales)
+
+    # Make 4 submission for the report
+    DATAPATH = '../kaggle/input/m5-forecasting-accuracy/'
+    calendar, prices, sales = data_frames(DATAPATH)
+    
+    MODELPATH = '../models/'
+    runs = [(f'{MODELPATH}lgb_year.pt', 365), (f'{MODELPATH}lgb_all.pt', 1000)]    
+    val_test = [('val', 28), ('test', 0)]
+
+    for model_file, days in runs:
+        print(f'Starting submissions for {model_file}')
+        model = lgb.Booster(model_file=model_file)        
+        for label, val_days in val_test:
+            print(f'# {label} set')
+            calendar_opt, prices_opt, sales_opt = optimize_df(calendar.copy(), 
+                                                              prices.copy(), 
+                                                              sales.copy(), 
+                                                              days=days,
+                                                              val_days=val_days)
+            sub_suffix = f'_lgb_{days}d_{label}'        
+            submission = infer(model, calendar_opt, prices_opt, sales_opt, filename=sub_suffix)

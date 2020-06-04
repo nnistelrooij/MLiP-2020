@@ -12,6 +12,8 @@ def handle_arguments():
                         r'"kaggle/input/m5-accuracy"')
     parser.add_argument('-d', '--days', type=int, default=365,
                         help='total number of days to train on, default: 365')
+    parser.add_argument('-v', '--val_days', type=int, default=0,
+                        help='number of validation days, default: 0')
     parser.add_argument('-i', '--iters', type=int, default=200,
                         help='number of training iterations, default: 200')
     parser.add_argument('-k', '--kaggle', action='store_true',
@@ -27,7 +29,7 @@ def handle_arguments():
     return args
 
 
-def run(path, days=None, iters=200, kaggle=False, model_path=None):
+def run(path, days=None, val_days=0, iters=200, kaggle=False, model_path=None):
     """
     Train a LightGBM model, and optionally create a kaggle submission.
 
@@ -45,7 +47,7 @@ def run(path, days=None, iters=200, kaggle=False, model_path=None):
     print("Loading training data...")
     start_time = datetime.now()
     calendar, prices, sales = data_frames(path)
-    calendar, prices, sales = optimize_df(calendar, prices, sales, days=days)
+    calendar, prices, sales = optimize_df(calendar, prices, sales, days=days, val_days=val_days)
     train_set, val_set = lgb_dataset(calendar, prices, sales)
     print("Data load time:", datetime.now() - start_time)
 
@@ -56,13 +58,12 @@ def run(path, days=None, iters=200, kaggle=False, model_path=None):
     if kaggle:
         submission = infer(lgb_model, calendar, prices, sales)
 
-    return lgb_model, submission
-
 
 if __name__ == "__main__":
     args = handle_arguments()
-    booster, submission = run(path=args.path, 
-                              days=args.days, 
-                              iters=args.iters,
-                              kaggle=args.kaggle, 
-                              model_path=args.save)
+    run(path=args.path, 
+        days=args.days, 
+        val_days=args.val_days,
+        iters=args.iters,
+        kaggle=args.kaggle, 
+        model_path=args.save)
