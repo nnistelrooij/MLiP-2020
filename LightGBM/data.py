@@ -91,7 +91,7 @@ def optimize_df(calendar, prices, sales, days=None, val_days=0, verbose=False):
         Optimized dataframes.
     """
     assert days > 56, f"Minimum days is {MAX_LAG}."
-    assert val_days != 0, "Invalid number of validation days."
+    assert val_days >= 0, "Invalid number of validation days."
     calendar['date'] = pd.to_datetime(calendar['date'], format='%Y-%m-%d')
 
     if val_days:
