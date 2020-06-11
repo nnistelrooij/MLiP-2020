@@ -47,7 +47,3 @@ def train(train_set, val_set, num_rounds=100, early_stopping_rounds=10,
         model.save_model(save_model)
 
     return model
-
-
-if __name__ == "__main__":
-    pass

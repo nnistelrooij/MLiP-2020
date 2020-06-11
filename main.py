@@ -2,7 +2,7 @@ import argparse
 from datetime import datetime
 
 import torch
-from torch.optim import Adagrad
+from torch.optim import Adagrad, Adam
 
 from nn import Model, WRMSSE
 from optim import optimize, ReduceLROnPlateau
@@ -32,6 +32,8 @@ def handle_arguments():
                         help='path to save model, default: "models/model.pt"')
     parser.add_argument('-l', '--num_hidden', type=int, default=5,
                         help='hidden units per store-item group, default: 5')
+    parser.add_argument('-a', '--adam', action='store_true',
+                        help='switch to use Adam optimizer with default LR')
 
     # parse and print arguments
     args = parser.parse_args()
@@ -68,7 +70,10 @@ if __name__ == '__main__':
     val_writer = MetricWriter(f'runs/{current_time}/validation', eval_freq=1)
 
     # initialize optimizer, scheduler, and criterion
-    optimizer = Adagrad(model.parameters(), lr=0.01)
+    if args.adam:
+        optimizer = Adam(model.parameters(), lr=0.001)
+    else:
+        optimizer = Adagrad(model.parameters(), lr=0.01)
     scheduler = ReduceLROnPlateau(val_writer, optimizer)
     criterion = WRMSSE(calendar, prices, sales, device)
 

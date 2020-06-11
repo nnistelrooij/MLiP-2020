@@ -1,4 +1,3 @@
-import math
 from pathlib import Path
 import random
 
@@ -315,34 +314,3 @@ def data_loaders(calendar, prices, sales,
     ))
 
     return train_loader, val_loader
-
-
-if __name__ == '__main__':
-    from datetime import datetime
-
-    path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning '
-            'in Practice\\Competition 2\\project\\')
-    calendar, prices, sales = data_frames(path)
-
-    time = datetime.now()
-    dataset = ForecastDataset(calendar, prices, sales, seq_len=8, horizon=5)
-    print('Time to initialize dataset: ', datetime.now() - time)
-
-    loader = DataLoader(dataset)
-    time = datetime.now()
-    for day, items, targets_day, targets_items in loader:
-        print('training: ', day.shape[1], items.shape[1],
-              targets_day.shape[1], targets_items.shape[1])
-        pass
-    print('Time to retrieve data: ', datetime.now() - time)
-
-    time = datetime.now()
-    dataset = ForecastDataset(calendar, prices, sales, seq_len=8, horizon=0)
-    print('Time to initialize dataset: ', datetime.now() - time)
-
-    loader = DataLoader(dataset)
-    time = datetime.now()
-    for day, items, sales in loader:
-        print('inference: ', day.shape[1], items.shape[1], sales.shape[1])
-        pass
-    print('Time to retrieve data: ', datetime.now() - time)

@@ -43,9 +43,9 @@ def get_predictions(pairs, parallel):
     preds = pd.concat(preds, axis=1)
 
     # select validation and evaluation predictions from all predictions
-    validation = preds[:-28].T
+    validation = preds[:28].T
     validation.index = range(validation.shape[0])
-    evaluation = preds[-28:].T
+    evaluation = preds[28:].T
     evaluation.index = range(evaluation.shape[0])
 
     # print parallel train and test times

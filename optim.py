@@ -171,7 +171,7 @@ def optimize(model,
         val_loader   = [DataLoader] DataLoader for validation data
         val_writer   = [MetricWriter] TensorBoard writer of validation metrics
         optimizer    = [Optimizer] optimizer to update the model
-        scheduler    = [object] scheduler to update the learning rates
+        scheduler    = [object] scheduler to update the learning rate
         criterion    = [nn.Module] neural network module to compute losses
         num_epochs   = [int] number of iterations over the training data
         num_val_days = [int] number of days to use for validation data
@@ -198,60 +198,3 @@ def optimize(model,
         # save best-performing model to storage
         if val_score == scheduler.best:
             torch.save(model.state_dict(), model_path)
-
-
-if __name__ == '__main__':
-    import os
-    import pandas as pd
-    import torch.nn as nn
-    from torch.utils.data import DataLoader
-
-    from nn import WRMSSE
-    from utils.data import ForecastDataset
-    from utils.tensorboard import MetricWriter
-
-    class Model(nn.Module):
-        def __init__(self, num_groups=30490, horizon=5):
-            super(Model, self).__init__()
-
-            self.param = nn.Parameter(torch.tensor(10.0))
-
-            self.num_groups = num_groups
-            self.horizon = horizon
-
-        def forward(self, x, y):
-            return torch.randn(self.num_groups, self.horizon) + self.param
-
-
-    path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning in'
-            ' Practice\\Competition 2\\project\\')
-    calendar = pd.read_csv(path + 'calendar.csv')
-    prices = pd.read_csv(path + 'sell_prices.csv')
-    sales = pd.read_csv(path + 'sales_train_validation.csv')
-    train_sales = pd.concat((sales.iloc[:, :6], sales.iloc[:, 1548:-28]), axis=1)
-    val_sales = pd.concat((sales.iloc[:, :6], sales.iloc[:, -28:]), axis=1)
-
-    seq_len = 8
-    horizon = 5
-    train_dataset = ForecastDataset(calendar, prices, train_sales, seq_len, horizon)
-    train_loader = DataLoader(train_dataset)
-
-    val_dataset = ForecastDataset(calendar, prices, val_sales)
-    val_loader = DataLoader(val_dataset)
-
-    train_writer = MetricWriter(log_dir='runs/train/')
-    val_writer = MetricWriter(eval_freq=1, log_dir='runs/val/')
-
-    model = Model(horizon=horizon)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
-    criterion = WRMSSE('cpu', calendar, prices, sales)
-
-    if not os.path.exists('models/'):
-        os.mkdir('models/')
-    optimize(model, train_loader, train_writer, val_loader, val_writer,
-             optimizer, ReduceLROnPlateau(val_writer, optimizer), criterion,
-             100, 'models/model.pt')
-
-
-    i = 3
-
