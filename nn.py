@@ -554,38 +554,3 @@ class Model(nn.Module):
             y.append(sub_y)
 
         return torch.cat(y, dim=-1)
-
-
-if __name__ == '__main__':
-    from datetime import datetime
-
-    linear = Linear(100, 0.5)
-
-    wolla = linear.dropout(torch.randn(100, 500))
-
-    day = torch.randn(1, 6, 29)
-    items = torch.randn(1, 6, 30490, 3)
-    t_day = torch.randn(1, 3, 29)
-    t_items = torch.randn(1, 3, 30490, 3)
-
-    y = model(day, items, t_day, t_items)
-
-    path = ('D:\\Users\\Niels-laptop\\Documents\\2019-2020\\Machine Learning '
-            'in Practice\\Competition 2\\project\\')
-    calendar = pd.read_csv(path + 'calendar.csv')
-    prices = pd.read_csv(path + 'sell_prices.csv')
-    sales = pd.read_csv(path + 'sales_train_validation.csv')
-
-    # device = torch.device('cuda')
-    device = torch.device('cpu')
-    time = datetime.now()
-    criterion = WRMSSE(device, calendar, prices, sales)
-    print('Time to initialize loss: ', datetime.now() - time)
-
-    horizon = 5
-    input = torch.rand(30490, horizon, device=device)
-    target = torch.rand(1, 30490, 3)
-
-    time = datetime.now()
-    loss = criterion(input, target)
-    print('Time to compute loss: ', datetime.now() - time)

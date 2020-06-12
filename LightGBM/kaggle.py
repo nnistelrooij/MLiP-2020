@@ -2,11 +2,10 @@ import pandas as pd
 
 import lightgbm as lgb
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from tqdm import tqdm
 
 from data import data_frames, optimize_df, melt_and_merge, features, lgb_dataset
-import model
 
 
 # Global constants
@@ -94,18 +93,6 @@ def infer(model, calendar, prices, sales, filename=''):
 
 
 if __name__ == "__main__":
-    # print("Loading training data...")
-    # start_time = datetime.now()
-    # calendar, prices, sales = data_frames('../kaggle/input/m5-forecasting-accuracy/')
-    # calendar, prices, sales = optimize_df(calendar, prices, sales, days=365)
-    # print("Data load time:", datetime.now() - start_time)
-
-    # # Load trained model
-    # filename = '../models/model_365d_500it.lgb'
-    # lgb_model = lgb.Booster(model_file=filename)
-
-    # submission = infer(lgb_model, calendar, prices, sales)
-
     # Make 4 submission for the report
     DATAPATH = '../kaggle/input/m5-forecasting-accuracy/'
     calendar, prices, sales = data_frames(DATAPATH)
